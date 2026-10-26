@@ -14,4 +14,5 @@ Dual-chip ESP32-P4 (flight) + ESP32-C5 (radio) flight controller. Plan: `docs/ES
 
 ## Commands
 - `make flight` / `make radio` - firmware builds
+- `make core-test` - host build of fc_core (sources used in place from the subtree; see `docs/fc_core.md`)
 - `make sim-setup` / `make sim-test` - Python sim environment (uv, Python 3.12) and tests

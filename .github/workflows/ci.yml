@@ -6,6 +6,18 @@ on:
   pull_request:
 
 jobs:
+  fc_core:
+    name: fc_core host tests (ASan/UBSan)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build
+        run: |
+          cmake -S firmware/fc_core -B build/fc_core -DFC_SANITIZE=ON -DCMAKE_C_COMPILER=clang
+          cmake --build build/fc_core -j
+      - name: Test
+        run: ctest --test-dir build/fc_core --output-on-failure
+
   sim:
     runs-on: ubuntu-latest
     steps:

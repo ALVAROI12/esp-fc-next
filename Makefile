@@ -6,9 +6,15 @@ IDF           := tools/idf.sh
 
 idf_build = $(IDF) $(1) -B build-$(2) -D SDKCONFIG=build-$(2)/sdkconfig -D IDF_TARGET=$(2) build
 
-.PHONY: all flight radio sim-setup sim-test pdf clean
+.PHONY: all flight radio core-test sim-setup sim-test pdf clean
 
-all: flight radio
+all: flight radio core-test
+
+# Host build of the flight algorithms with ASan/UBSan, then run the tests.
+core-test:
+	cmake -S firmware/fc_core -B build/fc_core -G Ninja -DFC_SANITIZE=ON
+	cmake --build build/fc_core
+	ctest --test-dir build/fc_core --output-on-failure
 
 flight:
 	$(call idf_build,firmware/flight,$(FLIGHT_TARGET))
@@ -28,4 +34,4 @@ pdf:
 	uv run --no-project --with reportlab python docs/build_plan_pdf.py
 
 clean:
-	rm -rf firmware/flight/build-* firmware/radio/build-*
+	rm -rf firmware/flight/build-* firmware/radio/build-* build

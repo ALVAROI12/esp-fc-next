@@ -1,0 +1,4 @@
+add_executable(test_controller_smoke test_controller_smoke.c)
+target_link_libraries(test_controller_smoke PRIVATE fc_core)
+target_compile_options(test_controller_smoke PRIVATE -Wall -Wextra -Werror)
+add_test(NAME controller_smoke COMMAND test_controller_smoke)

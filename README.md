@@ -10,6 +10,7 @@ The full plan, gap analysis and gates are in [`docs/ESP-FC-Next_Project_Plan.pdf
 | Path | Contents |
 | --- | --- |
 | `firmware/flight/` | ESP32-P4 flight firmware (ESP-Drone fork, imported with `git subtree`) |
+| `firmware/fc_core/` | Host (PC) build of the portable flight algorithms + HAL shims and tests ([docs](docs/fc_core.md)) |
 | `firmware/radio/` | ESP32-C5 radio co-processor firmware (SPI link, ESP-NOW swarm, Wi-Fi) |
 | `sim/` | Math models, software-in-the-loop bridge and swarm simulation (Python) |
 | `hardware/` | KiCad flight-controller design (Phase 3) |
@@ -31,6 +32,7 @@ make sim-setup
 | --- | --- |
 | `make flight` | Build P4 flight firmware (`FLIGHT_TARGET=esp32s3` for the old reference board) |
 | `make radio` | Build C5 radio firmware |
+| `make core-test` | Build flight algorithms on the PC with ASan/UBSan and run tests |
 | `tools/idf.sh firmware/flight -B build-esp32p4 menuconfig` | Any `idf.py` command inside the pinned container |
 | `make sim-test` | Run simulation and model tests |
 | `make pdf` | Regenerate the project plan PDF |
