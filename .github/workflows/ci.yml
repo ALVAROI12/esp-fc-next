@@ -9,8 +9,8 @@ jobs:
   sim:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
       - name: Set up sim environment
         run: |
           uv venv --python 3.12 sim/.venv
@@ -33,7 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     container: espressif/idf:release-v5.5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build firmware/${{ matrix.project }} for ${{ matrix.target }}
         shell: bash
         working-directory: firmware/${{ matrix.project }}
