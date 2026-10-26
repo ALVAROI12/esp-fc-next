@@ -1,0 +1,31 @@
+# ESP-FC Next developer entry points. Firmware builds run in the pinned ESP-IDF container.
+
+FLIGHT_TARGET ?= esp32p4
+RADIO_TARGET  ?= esp32c5
+IDF           := tools/idf.sh
+
+idf_build = $(IDF) $(1) -B build-$(2) -D SDKCONFIG=build-$(2)/sdkconfig -D IDF_TARGET=$(2) build
+
+.PHONY: all flight radio sim-setup sim-test pdf clean
+
+all: flight radio
+
+flight:
+	$(call idf_build,firmware/flight,$(FLIGHT_TARGET))
+
+radio:
+	$(call idf_build,firmware/radio,$(RADIO_TARGET))
+
+sim-setup:
+	uv venv --python 3.12 sim/.venv
+	# pybullet has no macOS arm64 wheel; its bundled zlib breaks on recent SDKs unless stdio.h is pre-included.
+	CFLAGS="-include stdio.h" uv pip install --python sim/.venv/bin/python -r sim/requirements.txt
+
+sim-test:
+	sim/.venv/bin/python -m pytest sim
+
+pdf:
+	uv run --no-project --with reportlab python docs/build_plan_pdf.py
+
+clean:
+	rm -rf firmware/flight/build-* firmware/radio/build-*

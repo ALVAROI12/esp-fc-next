@@ -1,0 +1,19 @@
+.DS_Store
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Python environments
+sim/.venv/
+.venv/
+
+# ESP-IDF build output
+firmware/*/build/
+firmware/*/build-*/
+firmware/*/sdkconfig
+firmware/*/sdkconfig.old
+firmware/*/managed_components/
+firmware/*/dependencies.lock
+
+# Host builds
+build/

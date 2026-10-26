@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  sim:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Set up sim environment
+        run: |
+          uv venv --python 3.12 sim/.venv
+          uv pip install --python sim/.venv/bin/python -r sim/requirements.txt
+      - name: Run sim tests
+        run: sim/.venv/bin/python -m pytest sim
+
+  firmware:
+    name: ${{ matrix.project }} (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: flight
+            target: esp32p4
+          - project: flight
+            target: esp32s3
+          - project: radio
+            target: esp32c5
+    runs-on: ubuntu-latest
+    container: espressif/idf:release-v5.5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build firmware/${{ matrix.project }} for ${{ matrix.target }}
+        shell: bash
+        working-directory: firmware/${{ matrix.project }}
+        run: |
+          . "${IDF_PATH}/export.sh"
+          idf.py -B build-${{ matrix.target }} \
+            -D SDKCONFIG=build-${{ matrix.target }}/sdkconfig \
+            -D IDF_TARGET=${{ matrix.target }} \
+            build
+      - name: Report image size
+        shell: bash
+        working-directory: firmware/${{ matrix.project }}
+        run: |
+          . "${IDF_PATH}/export.sh"
+          idf.py -B build-${{ matrix.target }} \
+            -D SDKCONFIG=build-${{ matrix.target }}/sdkconfig \
+            size
