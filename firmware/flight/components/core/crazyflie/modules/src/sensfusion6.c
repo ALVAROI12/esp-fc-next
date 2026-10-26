@@ -24,6 +24,8 @@
  *
  */
 #include <math.h>
+#include <stdint.h>
+#include <string.h>
 
 #include "sensfusion6.h"
 #include "log.h"
@@ -293,9 +295,12 @@ float invSqrt(float x)
 {
   float halfx = 0.5f * x;
   float y = x;
-  long i = *(long*)&y;
+  // ESP-FC Next: 32-bit integer + memcpy. `long` is 64-bit on PC hosts, which read past
+  // `y` and returned garbage in SITL; the pointer cast was also undefined behavior.
+  int32_t i;
+  memcpy(&i, &y, sizeof(i));
   i = 0x5f3759df - (i>>1);
-  y = *(float*)&i;
+  memcpy(&y, &i, sizeof(y));
   y = y * (1.5f - (halfx * y * y));
   return y;
 }

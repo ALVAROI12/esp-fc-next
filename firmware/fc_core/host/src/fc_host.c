@@ -5,6 +5,7 @@
  */
 #include "fc_host.h"
 
+#include <execinfo.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -101,6 +102,9 @@ void assertFail(char *exp, char *file, int line)
     s_assert_count++;
     fprintf(stderr, "ASSERT failed: %s (%s:%d)\n", exp, file, line);
     if (s_assert_aborts) {
+        void *frames[32];
+        int depth = backtrace(frames, 32);
+        backtrace_symbols_fd(frames, depth, 2);
         abort();
     }
 }

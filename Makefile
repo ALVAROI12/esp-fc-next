@@ -6,7 +6,14 @@ IDF           := tools/idf.sh
 
 idf_build = $(IDF) $(1) -B build-$(2) -D SDKCONFIG=build-$(2)/sdkconfig -D IDF_TARGET=$(2) build
 
-.PHONY: all flight radio core-test sim-setup sim-test pdf clean
+ifeq ($(shell uname),Darwin)
+GCOV ?= xcrun llvm-cov gcov
+else
+GCOV ?= gcov
+endif
+COVERAGE_FILTERS := --filter 'firmware/flight/components/core/' --filter 'firmware/fc_core/host/'
+
+.PHONY: all flight radio core-test core-coverage sim-setup sim-test pdf clean
 
 all: flight radio core-test
 
@@ -15,6 +22,16 @@ core-test:
 	cmake -S firmware/fc_core -B build/fc_core -G Ninja -DFC_SANITIZE=ON
 	cmake --build build/fc_core
 	ctest --test-dir build/fc_core --output-on-failure
+
+# Line/branch coverage of fc_core; HTML report in build/coverage/index.html.
+core-coverage:
+	cmake -S firmware/fc_core -B build/fc_core-cov -G Ninja -DFC_COVERAGE=ON
+	cmake --build build/fc_core-cov
+	find build/fc_core-cov -name '*.gcda' -delete
+	ctest --test-dir build/fc_core-cov --output-on-failure
+	mkdir -p build/coverage
+	sim/.venv/bin/gcovr --gcov-executable "$(GCOV)" -r . $(COVERAGE_FILTERS) \
+		--html-details build/coverage/index.html --print-summary build/fc_core-cov
 
 flight:
 	$(call idf_build,firmware/flight,$(FLIGHT_TARGET))

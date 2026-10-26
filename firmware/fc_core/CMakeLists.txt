@@ -33,7 +33,12 @@ set(FC_CORE_SOURCES
     ${CF}/utils/src/num.c
 )
 
-file(GLOB DSP_SOURCES ${COMPONENTS}/lib/dsp_lib/MatrixFunctions/*.c)
+# kalman_core needs matrix ops plus dsp_sin/cos (FastMath + their lookup tables).
+file(GLOB DSP_SOURCES
+    ${COMPONENTS}/lib/dsp_lib/MatrixFunctions/*.c
+    ${COMPONENTS}/lib/dsp_lib/FastMathFunctions/*.c
+    ${COMPONENTS}/lib/dsp_lib/CommonTables/*.c
+)
 
 add_library(fc_core STATIC ${FC_CORE_SOURCES} ${DSP_SOURCES} host/src/fc_host.c)
 
@@ -58,6 +63,12 @@ option(FC_SANITIZE "Build with AddressSanitizer and UndefinedBehaviorSanitizer" 
 if(FC_SANITIZE)
     target_compile_options(fc_core PUBLIC -fsanitize=address,undefined -fno-omit-frame-pointer)
     target_link_options(fc_core PUBLIC -fsanitize=address,undefined)
+endif()
+
+option(FC_COVERAGE "Instrument fc_core for gcov-style coverage (use with gcovr)" OFF)
+if(FC_COVERAGE)
+    target_compile_options(fc_core PUBLIC --coverage -O0 -g)
+    target_link_options(fc_core PUBLIC --coverage)
 endif()
 
 enable_testing()

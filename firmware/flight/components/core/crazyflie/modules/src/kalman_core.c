@@ -839,7 +839,10 @@ void kalmanCorePredict(kalmanCoreData_t* this, float cmdThrust, Axis3f *acc, Axi
   float angle = cf_sqrt(dtwx*dtwx + dtwy*dtwy + dtwz*dtwz);
   float ca = dsp_cos_f32(angle/2.0f);
   float sa = dsp_sin_f32(angle/2.0f);
-  float dq[4] = {ca , sa*dtwx/angle , sa*dtwy/angle , sa*dtwz/angle};
+  // ESP-FC Next: sin(a/2)/a -> 1/2 as a -> 0. Avoids 0/0 = NaN (and an ASSERT reset)
+  // when the gyro reads exactly zero, e.g. a stuck sensor or ideal simulated data.
+  float saOverAngle = angle > 1e-6f ? sa / angle : 0.5f;
+  float dq[4] = {ca , saOverAngle*dtwx , saOverAngle*dtwy , saOverAngle*dtwz};
 
   float tmpq0;
   float tmpq1;

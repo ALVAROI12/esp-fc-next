@@ -33,6 +33,7 @@ make sim-setup
 | `make flight` | Build P4 flight firmware (`FLIGHT_TARGET=esp32s3` for the old reference board) |
 | `make radio` | Build C5 radio firmware |
 | `make core-test` | Build flight algorithms on the PC with ASan/UBSan and run tests |
+| `make core-coverage` | Test coverage report (`build/coverage/index.html`) |
 | `tools/idf.sh firmware/flight -B build-esp32p4 menuconfig` | Any `idf.py` command inside the pinned container |
 | `make sim-test` | Run simulation and model tests |
 | `make pdf` | Regenerate the project plan PDF |
