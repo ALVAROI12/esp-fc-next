@@ -11,7 +11,8 @@ GCOV ?= xcrun llvm-cov gcov
 else
 GCOV ?= gcov
 endif
-COVERAGE_FILTERS := --filter 'firmware/flight/components/core/' --filter 'firmware/fc_core/host/'
+COVERAGE_FILTERS := --include-internal-functions --filter 'firmware/flight/components/core/' \
+	--filter 'firmware/fc_core/src/' --filter 'firmware/fc_core/host/'
 
 .PHONY: all flight radio core-test core-coverage sim-setup sim-test g1 viewer pdf clean
 

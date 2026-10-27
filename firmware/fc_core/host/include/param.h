@@ -30,7 +30,7 @@ void fc_host_register_params(const struct param_s *table, size_t count);
 #define PARAM_GROUP_STOP(NAME)                                                     \
     PARAM_ADD_GROUP(PARAM_GROUP | PARAM_STOP, stop_##NAME, 0x0)                    \
     };                                                                             \
-    __attribute__((constructor)) static void __register_params_##NAME(void)        \
+    __attribute__((constructor)) static void fc_register_params_##NAME(void)        \
     {                                                                              \
         fc_host_register_params(__params_##NAME, sizeof(__params_##NAME) / sizeof(__params_##NAME[0])); \
     }

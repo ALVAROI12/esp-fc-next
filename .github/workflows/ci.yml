@@ -23,7 +23,8 @@ jobs:
           cmake -S firmware/fc_core -B build/fc_core-cov -DFC_COVERAGE=ON -DCMAKE_C_COMPILER=gcc
           cmake --build build/fc_core-cov -j
           ctest --test-dir build/fc_core-cov
-          gcovr -r . --filter 'firmware/flight/components/core/' --filter 'firmware/fc_core/host/' \
+          gcovr -r . --include-internal-functions \
+            --filter 'firmware/flight/components/core/' --filter 'firmware/fc_core/src/' --filter 'firmware/fc_core/host/' \
             --markdown-summary "$GITHUB_STEP_SUMMARY" --print-summary build/fc_core-cov
 
   sim:

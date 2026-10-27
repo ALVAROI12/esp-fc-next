@@ -28,7 +28,7 @@ void fc_host_register_logs(const struct log_s *table, size_t count);
 #define LOG_GROUP_STOP(NAME)                                                 \
     LOG_ADD_GROUP(LOG_GROUP | LOG_STOP, stop_##NAME, 0x0)                    \
     };                                                                       \
-    __attribute__((constructor)) static void __register_logs_##NAME(void)    \
+    __attribute__((constructor)) static void fc_register_logs_##NAME(void)    \
     {                                                                        \
         fc_host_register_logs(__logs_##NAME, sizeof(__logs_##NAME) / sizeof(__logs_##NAME[0])); \
     }
