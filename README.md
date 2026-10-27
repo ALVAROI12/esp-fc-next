@@ -36,6 +36,7 @@ make sim-setup
 | `make core-coverage` | Test coverage report (`build/coverage/index.html`) |
 | `tools/idf.sh firmware/flight -B build-esp32p4 menuconfig` | Any `idf.py` command inside the pinned container |
 | `make sim-test` | Run simulation and model tests |
+| `make g1` | Gate G1 math-model report ([`sim/reports/g1`](sim/reports/g1/README.md)) |
 | `make pdf` | Regenerate the project plan PDF |
 
 ## Pulling upstream ESP-Drone changes

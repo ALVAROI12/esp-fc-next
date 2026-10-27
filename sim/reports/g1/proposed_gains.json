@@ -1,0 +1,97 @@
+{
+  "airframe": "2-inch ducted 1S whoop (assumed parameters, see README)",
+  "timing": {
+    "sensor_rate_hz": 4000.0,
+    "gyro_lpf_hz": 150.0,
+    "attitude_rate_hz": 4000.0,
+    "position_rate_hz": 100.0,
+    "compute_delay_samples": 1,
+    "source": "project plan: 4 kHz ICM-42688-P sampling and rate loop on the ESP32-P4"
+  },
+  "gains": {
+    "roll_rate": {
+      "kp": 255.92047711744624,
+      "ki": 511.8409542348925,
+      "kd": 3.2,
+      "i_limit": 33.3
+    },
+    "pitch_rate": {
+      "kp": 255.92047711744624,
+      "ki": 511.8409542348925,
+      "kd": 3.2,
+      "i_limit": 33.3
+    },
+    "yaw_rate": {
+      "kp": 93.07533556889504,
+      "ki": 12.95298420000456,
+      "kd": 0.0,
+      "i_limit": 166.7
+    },
+    "roll": {
+      "kp": 41.88860387342631,
+      "ki": 20.58931376829429,
+      "kd": 0.0,
+      "i_limit": 20.0
+    },
+    "pitch": {
+      "kp": 41.88860387342631,
+      "ki": 20.58931376829429,
+      "kd": 0.0,
+      "i_limit": 20.0
+    },
+    "yaw": {
+      "kp": 10.586216272602785,
+      "ki": 1.7643693787671308,
+      "kd": 0.35,
+      "i_limit": 360.0
+    }
+  },
+  "interim_gains_for_stock_timing": {
+    "timing": {
+      "sensor_rate_hz": 1000.0,
+      "gyro_lpf_hz": 80.0,
+      "attitude_rate_hz": 500.0,
+      "position_rate_hz": 100.0,
+      "compute_delay_samples": 1,
+      "source": "firmware source"
+    },
+    "gains": {
+      "roll_rate": {
+        "kp": 42.8830057624885,
+        "ki": 85.766011524977,
+        "kd": 0.8,
+        "i_limit": 33.3
+      },
+      "pitch_rate": {
+        "kp": 42.8830057624885,
+        "ki": 85.766011524977,
+        "kd": 0.8,
+        "i_limit": 33.3
+      },
+      "yaw_rate": {
+        "kp": 74.21504232821376,
+        "ki": 10.32826005734308,
+        "kd": 0.0,
+        "i_limit": 166.7
+      },
+      "roll": {
+        "kp": 12.903738141086846,
+        "ki": 6.342515357483364,
+        "kd": 0.0,
+        "i_limit": 20.0
+      },
+      "pitch": {
+        "kp": 12.903738141086846,
+        "ki": 6.342515357483364,
+        "kd": 0.0,
+        "i_limit": 20.0
+      },
+      "yaw": {
+        "kp": 8.455638430179526,
+        "ki": 1.4092730716965876,
+        "kd": 0.35,
+        "i_limit": 360.0
+      }
+    }
+  }
+}

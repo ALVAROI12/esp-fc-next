@@ -37,6 +37,11 @@ jobs:
           uv pip install --python sim/.venv/bin/python -r sim/requirements.txt
       - name: Run sim tests
         run: sim/.venv/bin/python -m pytest sim
+      - name: Gate G1 (math model)
+        working-directory: sim
+        run: |
+          .venv/bin/python g1_report.py --samples 300 --no-plots --out "$RUNNER_TEMP/g1"
+          cat "$RUNNER_TEMP/g1/README.md" >> "$GITHUB_STEP_SUMMARY"
 
   firmware:
     name: ${{ matrix.project }} (${{ matrix.target }})

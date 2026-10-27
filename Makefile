@@ -13,7 +13,7 @@ GCOV ?= gcov
 endif
 COVERAGE_FILTERS := --filter 'firmware/flight/components/core/' --filter 'firmware/fc_core/host/'
 
-.PHONY: all flight radio core-test core-coverage sim-setup sim-test pdf clean
+.PHONY: all flight radio core-test core-coverage sim-setup sim-test g1 pdf clean
 
 all: flight radio core-test
 
@@ -46,6 +46,10 @@ sim-setup:
 
 sim-test:
 	sim/.venv/bin/python -m pytest sim
+
+# Gate G1 math-model report -> sim/reports/g1/README.md (non-zero exit if the gate fails).
+g1:
+	cd sim && .venv/bin/python g1_report.py
 
 pdf:
 	uv run --no-project --with reportlab python docs/build_plan_pdf.py
