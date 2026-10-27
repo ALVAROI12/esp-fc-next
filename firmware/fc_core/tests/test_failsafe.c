@@ -170,6 +170,19 @@ static void test_full_queues_cannot_refresh_receipt_age(void)
     TEST_ASSERT_EQUAL(0, safety_log("tofFresh"));
 }
 
+static void test_rearm_after_disarm_in_hold_starts_clean(void)
+{
+    hover();
+    for (unsigned i = 0; i < 510 && fc_failsafe_state() == FC_FAILSAFE_NORMAL; i++)
+        drive(1, true, true, false, 1);
+    TEST_ASSERT_EQUAL(FC_FAILSAFE_HOLD, fc_failsafe_state());
+    TEST_ASSERT_TRUE(fc_arm(false));
+    drive(50, true, true, false, 0);
+    TEST_ASSERT_TRUE(fc_arm(true));
+    TEST_ASSERT_EQUAL(FC_FAILSAFE_NORMAL, fc_failsafe_state()); /* no stale HOLD pose/reason after rearm */
+    TEST_ASSERT_EQUAL(0, safety_log("reason"));
+}
+
 static void test_hold_captures_estimate_not_stale_trajectory_and_can_cancel(void)
 {
     hover();
@@ -653,6 +666,7 @@ int main(void)
     RUN_TEST(test_ground_stale_or_absent_command_never_starts_landing_motors);
     RUN_TEST(test_first_command_has_bounded_arm_grace_without_motor_output);
     RUN_TEST(test_emergency_stop_and_disarm_override_latched_landing);
+    RUN_TEST(test_rearm_after_disarm_in_hold_starts_clean);
     RUN_TEST(test_dead_accelerometer_never_completes_calibration);
     RUN_TEST(test_tumble_protection_remains_active_during_first_command_grace);
     RUN_TEST(test_tumble_still_overrides_landing_and_tilted_tof_is_rejected);

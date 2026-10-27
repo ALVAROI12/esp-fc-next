@@ -189,8 +189,7 @@ static void filter_gyro(const float gyro[3])
 static float tilt_deg(void)
 {
     /* angle between body z and world z from the estimated quaternion */
-    const quaternion_t *q = &fc.state.attitudeQuaternion;
-    float r22 = 1.0f - 2.0f * (q->x * q->x + q->y * q->y);
+    float r22 = vertical_cosine();
     if (r22 > 1.0f) r22 = 1.0f;
     if (r22 < -1.0f) r22 = -1.0f;
     return acosf(r22) * 57.29578f;
@@ -214,6 +213,9 @@ bool fc_arm(bool armed)
         return false;
     }
     if (fc.armed) return true; /* idempotent: do not reset the lift-off reference midflight */
+    /* A fresh arm never inherits a pre-landing HOLD pose or reason (LAND and later are refused above). */
+    fc.safetyState = FC_FAILSAFE_NORMAL;
+    fc.safetyReason = 0;
     fc.armed = true;
     fc.armTick = fc.tick;
     fc.airborne = false;
