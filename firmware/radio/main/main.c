@@ -10,6 +10,8 @@
 #include "esp_log.h"
 #include "nvs_flash.h"
 
+#include "fc_link.h"
+
 static const char *TAG = "radio";
 
 void app_main(void)
@@ -22,4 +24,10 @@ void app_main(void)
     ESP_ERROR_CHECK(err);
 
     ESP_LOGI(TAG, "ESP-FC Next radio %s started", esp_app_get_description()->version);
+
+    /* Boot self-check of the shared link codec on the target toolchain. */
+    uint8_t frame[FC_LINK_FRAME_SIZE];
+    fc_link_frame_t idle = {.type = FC_LINK_IDLE}, back;
+    bool ok = fc_link_encode(&idle, frame) && fc_link_decode(frame, sizeof frame, &back) == FC_LINK_OK;
+    ESP_LOGI(TAG, "link codec self-check %s", ok ? "ok" : "FAILED");
 }
