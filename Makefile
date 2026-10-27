@@ -14,7 +14,7 @@ endif
 COVERAGE_FILTERS := --include-internal-functions --filter 'firmware/flight/components/core/' \
 	--filter 'firmware/fc_core/src/' --filter 'firmware/fc_core/host/'
 
-.PHONY: all flight radio core-test core-coverage sim-setup sim-test g1 vibration failsafe flow-braking viewer pdf clean
+.PHONY: all flight radio core-test core-coverage sim-setup sim-test g1 vibration failsafe flow-braking link-fuzz viewer pdf clean
 
 all: flight radio core-test
 
@@ -33,6 +33,15 @@ core-coverage:
 	mkdir -p build/coverage
 	sim/.venv/bin/gcovr --gcov-executable "$(GCOV)" -r . $(COVERAGE_FILTERS) \
 		--html-details build/coverage/index.html --print-summary build/fc_core-cov
+
+# libFuzzer run of the P4<->C5 link codec (Task 1.7 gate: 1 h without crashes). FUZZ_SECONDS=60 for a smoke run.
+FUZZ_SECONDS ?= 3600
+FUZZ_CC ?= $(shell [ -x /opt/homebrew/opt/llvm/bin/clang ] && echo /opt/homebrew/opt/llvm/bin/clang || echo clang)
+link-fuzz:
+	cmake -S firmware/fc_core -B build/fuzz -G Ninja -DFC_FUZZ=ON -DCMAKE_C_COMPILER=$(FUZZ_CC)
+	cmake --build build/fuzz --target fuzz_link
+	mkdir -p build/fuzz/corpus
+	build/fuzz/fuzz_link -max_total_time=$(FUZZ_SECONDS) -print_final_stats=1 build/fuzz/corpus
 
 flight:
 	$(call idf_build,firmware/flight,$(FLIGHT_TARGET))

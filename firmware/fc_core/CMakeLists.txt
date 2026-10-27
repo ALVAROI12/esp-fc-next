@@ -44,7 +44,7 @@ file(GLOB DSP_SOURCES
 )
 
 # ESP-FC Next portable loop (fc_step + synchronous Kalman) and host HAL.
-set(FC_SOURCES src/fc_step.c src/fc_kalman.c src/fc_profile.c src/fc_rpm_notch.c)
+set(FC_SOURCES src/fc_step.c src/fc_kalman.c src/fc_profile.c src/fc_rpm_notch.c src/fc_link.c)
 set(HOST_SOURCES host/src/fc_host.c host/src/fc_vars.c)
 
 function(fc_configure target)
@@ -99,6 +99,16 @@ option(FC_COVERAGE "Instrument fc_core for gcov-style coverage (use with gcovr)"
 if(FC_COVERAGE)
     target_compile_options(fc_core PUBLIC --coverage -O0 -g)
     target_link_options(fc_core PUBLIC --coverage)
+endif()
+
+# libFuzzer target for the link codec (needs LLVM clang, e.g. Homebrew llvm on macOS).
+option(FC_FUZZ "Build the fc_link libFuzzer target" OFF)
+if(FC_FUZZ)
+    add_executable(fuzz_link tests/fuzz_link.c src/fc_link.c)
+    target_include_directories(fuzz_link PRIVATE include)
+    target_compile_options(fuzz_link PRIVATE -g -O1 -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=all)
+    target_link_options(fuzz_link PRIVATE -fsanitize=fuzzer,address,undefined)
+    target_link_libraries(fuzz_link PRIVATE m)
 endif()
 
 enable_testing()

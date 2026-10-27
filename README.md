@@ -54,6 +54,7 @@ make sim-setup
 | `make vibration` | Task 1.6b vibration/notch report ([`sim/reports/vibration`](sim/reports/vibration/README.md)) |
 | `make failsafe` | Opt-in latched landing/fault evidence ([`sim/reports/failsafe`](sim/reports/failsafe/README.md)) |
 | `make flow-braking` | Camera-loss braking comparison and sampled stresses |
+| `make link-fuzz` | libFuzzer run of the P4<->C5 link codec ([protocols](docs/protocols.md)); `FUZZ_SECONDS=60` for a smoke run |
 | `make viewer` | Interactive 3D simulation replay with charts (opens in the browser) |
 | `make pdf` | Regenerate the project plan PDF |
 
