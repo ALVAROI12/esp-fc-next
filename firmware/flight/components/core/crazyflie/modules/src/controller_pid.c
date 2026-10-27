@@ -11,6 +11,7 @@
 #include "debug_cf.h"
 #include "param.h"
 #include "math3d.h"
+#include <string.h>
 
 #define ATTITUDE_UPDATE_DT    (float)(1.0f/ATTITUDE_RATE)
 
@@ -33,6 +34,19 @@ void controllerPidInit(void)
 {
   attitudeControllerInit(ATTITUDE_UPDATE_DT);
   positionControllerInit();
+}
+
+// ESP-FC Next: initialization is not a reset (attitude init is guarded, position init resets gains).
+// Explicitly reset held commands and integrators while preserving a coherent runtime profile.
+void controllerPidReset(const state_t *state)
+{
+  memset(&attitudeDesired, 0, sizeof(attitudeDesired));
+  memset(&rateDesired, 0, sizeof(rateDesired));
+  attitudeDesired.yaw = state->attitude.yaw;
+  actuatorThrust = 0;
+  cmd_thrust = cmd_roll = cmd_pitch = cmd_yaw = 0;
+  attitudeControllerResetAllPID();
+  positionControllerResetAllPID();
 }
 
 bool controllerPidTest(void)

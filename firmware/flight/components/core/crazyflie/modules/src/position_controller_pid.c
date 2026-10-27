@@ -78,6 +78,14 @@ static float xyVelMax = 1.0f;
 static float zVelMax  = 1.0f;
 static float velMaxOverhead = 1.10f;
 static const float thrustScale = 1000.0f;
+// ESP-FC Next: feedforward of the setpoint velocity in position mode (0 = stock behaviour).
+// Removes the tracking lag when following trajectories that carry velocity.
+static float velFF = 0.0f;
+// ESP-FC Next: feedforward of the setpoint acceleration as tilt, atan(a/g) (0 = stock behaviour).
+static float accFF = 0.0f;
+// ESP-FC Next: thrust units per m/s^2 of vertical setpoint acceleration (airframe-specific; 0 = none).
+// For thrust proportional to command^2 around hover this is thrustBase / (2 g).
+static float thrustPerAcc = 0.0f;
 
 #define DT (float)(1.0f/POSITION_RATE)
 #define POSITION_LPF_CUTOFF_FREQ 20.0f
@@ -194,20 +202,21 @@ void positionController(float* thrust, attitude_t *attitude, setpoint_t *setpoin
   float sinyaw = sinf(state->attitude.yaw * (float)M_PI / 180.0f);
   float bodyvx = setpoint->velocity.x;
   float bodyvy = setpoint->velocity.y;
+  float setvz = setpoint->velocity.z;
 
   // X, Y
   if (setpoint->mode.x == modeAbs) {
-    setpoint->velocity.x = runPid(state->position.x, &this.pidX, setpoint->position.x, DT);
+    setpoint->velocity.x = runPid(state->position.x, &this.pidX, setpoint->position.x, DT) + velFF * bodyvx;
   } else if (setpoint->velocity_body) {
     setpoint->velocity.x = bodyvx * cosyaw - bodyvy * sinyaw;
   }
   if (setpoint->mode.y == modeAbs) {
-    setpoint->velocity.y = runPid(state->position.y, &this.pidY, setpoint->position.y, DT);
+    setpoint->velocity.y = runPid(state->position.y, &this.pidY, setpoint->position.y, DT) + velFF * bodyvy;
   } else if (setpoint->velocity_body) {
     setpoint->velocity.y = bodyvy * cosyaw + bodyvx * sinyaw;
   }
   if (setpoint->mode.z == modeAbs) {
-    setpoint->velocity.z = runPid(state->position.z, &this.pidZ, setpoint->position.z, DT);
+    setpoint->velocity.z = runPid(state->position.z, &this.pidZ, setpoint->position.z, DT) + velFF * setvz;
   }
 
   velocityController(thrust, attitude, setpoint, state);
@@ -225,6 +234,10 @@ void velocityController(float* thrust, attitude_t *attitude, setpoint_t *setpoin
   // Roll and Pitch
   float rollRaw  = runPid(state->velocity.x, &this.pidVX, setpoint->velocity.x, DT);
   float pitchRaw = runPid(state->velocity.y, &this.pidVY, setpoint->velocity.y, DT);
+  if (accFF > 0.0f) {
+    rollRaw  += accFF * atanf(setpoint->acceleration.x / 9.81f) * (180.0f / (float)M_PI);
+    pitchRaw += accFF * atanf(setpoint->acceleration.y / 9.81f) * (180.0f / (float)M_PI);
+  }
 
   float yawRad = state->attitude.yaw * (float)M_PI / 180;
   attitude->pitch = -(rollRaw  * cosf(yawRad)) - (pitchRaw * sinf(yawRad));
@@ -236,7 +249,7 @@ void velocityController(float* thrust, attitude_t *attitude, setpoint_t *setpoin
   // Thrust
   float thrustRaw = runPid(state->velocity.z, &this.pidVZ, setpoint->velocity.z, DT);
   // Scale the thrust and add feed forward term
-  *thrust = thrustRaw*thrustScale + this.thrustBase;
+  *thrust = thrustRaw*thrustScale + this.thrustBase + accFF * thrustPerAcc * setpoint->acceleration.z;
   // Check for minimum thrust
   if (*thrust < this.thrustMin) {
     *thrust = this.thrustMin;
@@ -321,5 +334,8 @@ PARAM_ADD(PARAM_UINT16, thrustMin, &this.thrustMin)
 PARAM_ADD(PARAM_FLOAT, rpLimit,  &rpLimit)
 PARAM_ADD(PARAM_FLOAT, xyVelMax, &xyVelMax)
 PARAM_ADD(PARAM_FLOAT, zVelMax,  &zVelMax)
+PARAM_ADD(PARAM_FLOAT, velFF, &velFF)
+PARAM_ADD(PARAM_FLOAT, accFF, &accFF)
+PARAM_ADD(PARAM_FLOAT, thrustPerAcc, &thrustPerAcc)
 
 PARAM_GROUP_STOP(posCtlPid)

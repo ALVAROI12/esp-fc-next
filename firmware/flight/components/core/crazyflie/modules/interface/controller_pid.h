@@ -29,6 +29,8 @@
 #include "stabilizer_types.h"
 
 void controllerPidInit(void);
+/* ESP-FC Next: clear controller dynamics without changing tuned parameters. */
+void controllerPidReset(const state_t *state);
 bool controllerPidTest(void);
 void controllerPid(control_t *control, setpoint_t *setpoint,
                                          const sensorData_t *sensors,

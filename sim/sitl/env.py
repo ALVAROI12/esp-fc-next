@@ -25,9 +25,11 @@ class GotoEnv:
     action_size = 3
 
     def __init__(self, vehicle: Vehicle = WHOOP_2IN, control_hz: float = 10.0, episode_seconds: float = 10.0,
-                 max_step: float = 0.5, arena: float = 1.0, seed: int | None = None):
+                 max_step: float = 0.5, arena: float = 1.0, seed: int | None = None,
+                 profile: str = "whoop2_interim"):
         self.vehicle = vehicle
-        self.ticks_per_action = int(round(1000 / control_hz))
+        self.profile = profile
+        self.control_hz = control_hz
         self.max_actions = int(episode_seconds * control_hz)
         self.max_step = max_step
         self.arena = arena
@@ -47,8 +49,8 @@ class GotoEnv:
     def reset(self, seed: int | None = None) -> tuple[np.ndarray, dict]:
         if seed is not None:
             self.rng = np.random.default_rng(seed)
-        self.drone = SitlDrone(self.vehicle, seed=int(self.rng.integers(1 << 31)))
-        self.drone.fw.set_param("posCtlPid.zKi", 0.0)  # SITL tuning finding, see sim/README.md
+        self.drone = SitlDrone(self.vehicle, seed=int(self.rng.integers(1 << 31)), profile=self.profile)
+        self.ticks_per_action = int(round(self.drone.rate / self.control_hz))
         self.drone.calibrate_and_arm()
         self.drone.takeoff(1.0, 2.0)
         self.drone.run(3.0)
@@ -64,7 +66,7 @@ class GotoEnv:
         target[2] = max(0.2, target[2])
         self.drone.goto(*target, 0.0, duration=0.0)
         for _ in range(self.ticks_per_action):
-            self.drone.step(record_every=1_000_000)
+            self.drone.step(record=False)
         self.actions += 1
 
         obs = self._obs()

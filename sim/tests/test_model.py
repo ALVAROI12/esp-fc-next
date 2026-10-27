@@ -30,6 +30,15 @@ def test_gains_are_read_from_pid_h():
     assert load_gains(S2_DRONE_PROFILE).roll_rate.kp == 190.0
 
 
+def test_generated_board_profile_matches_g1_outputs():
+    import json
+    from gen_profile_header import GAINS_JSON, HEADER, render
+
+    assert HEADER.read_text() == render(json.loads(GAINS_JSON.read_text()))
+    with pytest.raises(ValueError, match="passing G1"):
+        render({"gate_passed": False})
+
+
 # ---- dynamics ----
 
 def test_hover_command_is_an_equilibrium():

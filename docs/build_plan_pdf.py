@@ -101,7 +101,7 @@ def architecture_drawing():
     box(d, 0, 150, W, 100, "ESP32-P4  -  flight + vision (no radio)", [
         "HP core 1: gyro 4 kHz -> filters -> rate PID -> mixer -> DShot to 4-in-1 ESC   [hard real-time, no allocation]",
         "HP core 0: EKF (500 Hz-1 kHz), position control, autonomy, swarm logic, blackbox logging",
-        "LP core:   independent safety watchdog - cuts motors if the flight core stalls or misses deadlines",
+        "LP core:   safety watchdog (same-chip; validate actuator shutdown path)",
         "Sensors:   ICM-42688-P (SPI), BMP581, PMW3901 flow + VL53L1X ToF, INA226 power monitor",
         "Later:     MIPI-CSI camera + H.264 encoder for surveillance video",
         "Storage:   16 MB flash + microSD blackbox",
@@ -129,7 +129,7 @@ def on_page(canvas, doc):
     canvas.saveState()
     canvas.setFont("Helvetica", 7.5)
     canvas.setFillColor(colors.grey)
-    canvas.drawString(0.75 * inch, 0.5 * inch, "ESP-FC Next - Project Plan v1.1")
+    canvas.drawString(0.75 * inch, 0.5 * inch, "ESP-FC Next - Project Plan v1.2")
     canvas.drawRightString(7.75 * inch, 0.5 * inch, f"Page {doc.page}")
     canvas.setStrokeColor(GRID)
     canvas.line(0.75 * inch, 0.62 * inch, 7.75 * inch, 0.62 * inch)
@@ -146,7 +146,7 @@ def build():
     s.append(table([
         ["Item", "Value"],
         ["Document", "Project plan, gap analysis and Phase 1 task list"],
-        ["Version / date", f"v1.1 - {date.today():%B %d, %Y}"],
+        ["Version / date", f"v1.2 - {date.today():%B %d, %Y}"],
         ["Base project", "Espressif ESP-Drone (GPL-3.0), master after PR #137 (ESP-IDF 5.5 / 6.1)"],
         ["First target", "Indoor swarm of 4 drones, USA"],
         ["Guiding rule", "Nothing is ordered or assembled until math, simulation and code/PCB review gates pass"],
@@ -193,7 +193,7 @@ def build():
     s.append(p("rtlopez/esp-fc (Betaflight-configurator-compatible ESP32 firmware), ArduPilot's experimental "
                "ESP32 port, Crazyflie upstream, and the open-source Low-Cost-Mocap project (ESP32 drone swarm "
                "with PS3 Eye cameras)."))
-    s.append(KeepTogether([p("Progress so far (v1.1)", H2), table([
+    s.append(KeepTogether([p("Progress so far (v1.2)", H2), table([
         ["Task", "Status", "Key result"],
         ["1.1 Repo + toolchain", "Done", "Private GitHub repo, Docker ESP-IDF 5.5 (Colima), CI builds P4 + S3 + C5 firmware"],
         ["1.2 Portable flight core", "Done", "18 Crazyflie algorithm files build on the PC unchanged (fc_core); HAL = existing driver interfaces"],
@@ -206,7 +206,14 @@ def build():
          "ctypes lockstep; 84 params / 103 logs by cfclient names; steady hover error &lt; 3 cm, estimator error &lt; 1 cm. "
          "Findings: posCtlPid.zKi causes 11.4 cm takeoff overshoot (0.2 cm with zKi = 0); no velocity feedforward in "
          "the 2021 position controller (0.3-0.4 s tracking lag); stock link-loss behaviour drops the drone. Gym-style RL env."],
-    ], [1.35, 0.8, 4.85])]))
+        ["1.6a Flight-core simulation", "Simulation checks pass; hardware pending",
+         "1/4 kHz host variants, 500 Hz EKF at 4 kHz, G1-generated board profiles, velocity/acceleration feedforward, "
+         "exact sqrt on FPU builds, arming/tumble guards. Camera-tracked figure-8: about 4-5 cm maximum error in "
+         "nominal simulation (10 cm target); flow-only absolute positioning FAILS (FLOW-01)."],
+    ], [1.35, 0.8, 4.85]), p(
+        "4 kHz is a host/SITL configuration, not a measured ESP32-P4 runtime. The production P4 image still uses "
+        "the existing ESP-Drone task loop. Driver integration, CPU deadlines, Wi-Fi/camera contention and hardware "
+        "flight are unvalidated. Dynamic-notch/RPM filtering is deferred to Task 1.6b.", NOTE)]))
     s.append(PageBreak())
 
     # ---------------- 2. Gap analysis ----------------
@@ -252,11 +259,12 @@ def build():
     s.append(Spacer(1, 6))
     s.append(p("Why this split", H2))
     s += bullets([
-        "<b>ESP32-P4:</b> large compute headroom over the S2/S3, a low-power core usable as an independent safety "
-        "monitor, and a camera interface plus hardware H.264 encoder for the surveillance variant.",
+        "<b>ESP32-P4:</b> large compute headroom over the S2/S3, a low-power safety monitor "
+        "(same-chip; validate actuator shutdown path), and a camera interface plus hardware H.264 encoder for the "
+        "surveillance variant. The LP core is NOT an independent safety barrier.",
         "<b>ESP32-C5 module:</b> dual-band Wi-Fi 6 (5 GHz is less crowded indoors) and ESP-NOW for drone-to-drone "
-        "messages. Radio interrupts never touch the flight loop. Using a pre-certified module avoids separate FCC "
-        "intentional-radiator certification for the board.",
+        "messages. Radio interrupts never touch the flight loop. A pre-certified module can reduce FCC certification "
+        "work only within its grant and integration constraints; host compliance obligations remain.",
         "<b>Fills an upstream gap:</b> ESP-Drone currently runs the P4 in a no-radio diagnostic profile and notes it "
         "still needs a companion radio design.",
         "<b>Failure isolation:</b> if the C5 or Wi-Fi fails, the P4 keeps stabilizing and runs its failsafe (hover, "
@@ -382,10 +390,9 @@ def build():
 
     # ---------------- 9. AI and autonomy ----------------
     s.append(p("9. AI and autonomy track", H1))
-    s.append(p("Learned components are added only on top of the verified classical controller: they output setpoints "
-               "(position/velocity/attitude targets), never raw motor commands, and the PID loop plus a safety "
-               "supervisor remain the fallback. Everything is trained and validated in simulation first, following "
-               "the same gates."))
+    s.append(p("Learned components output setpoints (position/velocity/attitude targets), never raw motor commands; "
+               "the verified PID loop and safety supervisor remain the fallback. Training runs on a workstation, "
+               "with simulation validation under the same gates. On-board inference only after validation."))
     s.append(p("What fits on the ESP32-P4", H2))
     s.append(table([
         ["Task", "Model", "Reported P4 performance", "Fit"],
@@ -393,17 +400,18 @@ def build():
          "About 51 ms inference, over 18 FPS incl. pre/post-processing", "Good: detect-and-follow at low speed"],
         ["General multi-class detection", "YOLO11n, 640x640", "About 2.75 s per frame",
          "Too slow for flight; use for offline/ground processing"],
-        ["RL flight/swarm policy", "Small MLP (e.g. 2 x 64 neurons)", "Microseconds per inference",
-         "Excellent: can run at 1 kHz+"],
+        ["RL flight/swarm policy", "Small MLP (e.g. 2 x 64 neurons)",
+         "Not benchmarked; depends on network size, quantization and concurrent load",
+         "Candidate for high-level setpoints; benchmark before deployment"],
     ], [1.6, 1.85, 1.85, 1.7]))
-    s.append(p("Figures are published Espressif / community benchmarks, not yet measured on this hardware; the flight "
+    s.append(p("Detection figures are published Espressif / community benchmarks, not yet measured on this hardware; the flight "
                "loop occupies one P4 core, so CNN frame rate will be measured in Phase 2.", NOTE))
     s.append(p("Roadmap", H2))
     s.append(table([
         ["Phase", "AI work"],
-        ["Phase 1 (now)", "SITL exposes a Gym-style environment (reset/step) so policies can be trained on a laptop"],
-        ["Phase 4 (swarm)", "RL policies for formation keeping and inter-drone collision avoidance, trained in the "
-         "4-drone simulation, run on board as small MLPs fed by ESP-NOW neighbour states"],
+        ["Phase 1 (now)", "SITL exposes a Gym-style environment (reset/step) so policies can be trained on a workstation"],
+        ["Phase 4 (swarm)", "Workstation-trained RL for formation keeping and collision avoidance in the 4-drone "
+         "simulation. On-board MLP inference from ESP-NOW neighbour states only after validation and benchmarking"],
         ["Phase 5 (surveillance)", "On-board person detection on the P4 camera input (MIPI-CSI) with ESP-DL; "
          "detect-and-follow behaviour gated by the safety supervisor"],
     ], [1.6, 5.4]))
@@ -432,7 +440,10 @@ def build():
     s.append(KeepTogether([p("11. US regulatory notes", H1), table([
         ["Topic", "Notes"],
         ["Indoor flight", "FAA airspace rules generally do not apply to flights fully indoors; no registration or Remote ID needed for indoor-only research."],
-        ["Radio (FCC)", "Use an FCC-certified ESP32-C5 module (not the bare chip) to avoid board-level intentional-radiator certification. The P4 has no radio. ELRS 2.4 GHz gear is commercially certified."],
+        ["Radio (FCC)", "Use an FCC-certified ESP32-C5 module (not the bare chip) within its grant and integration "
+         "constraints (antenna, placement, RF exposure and labeling). Module certification is not an exemption from "
+         "all FCC host testing; host emissions, RF exposure and other applicable compliance obligations remain. "
+         "The P4 has no radio. Verify certification and integration requirements for the selected ELRS gear."],
         ["Outdoor (later)", "Under 250 g recreational: registration not required unless flying under Part 107. Over 250 g or research under Part 107: registration and Remote ID required (the C5 can broadcast it)."],
         ["Surveillance", "State privacy and recording laws apply. Fly only in spaces you control during research."],
     ], [1.4, 5.6])]))

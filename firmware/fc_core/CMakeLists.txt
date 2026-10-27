@@ -44,7 +44,7 @@ file(GLOB DSP_SOURCES
 )
 
 # ESP-FC Next portable loop (fc_step + synchronous Kalman) and host HAL.
-set(FC_SOURCES src/fc_step.c src/fc_kalman.c)
+set(FC_SOURCES src/fc_step.c src/fc_kalman.c src/fc_profile.c)
 set(HOST_SOURCES host/src/fc_host.c host/src/fc_vars.c)
 
 function(fc_configure target)
@@ -67,17 +67,32 @@ function(fc_configure target)
     target_link_libraries(${target} PUBLIC m)
 endfunction()
 
-add_library(fc_core STATIC ${CF_SOURCES} ${DSP_SOURCES} ${FC_SOURCES} ${HOST_SOURCES})
-fc_configure(fc_core)
+# Planned ESP-FC Next timing on the P4 (G1 report): 4 kHz main + attitude loop, 150 Hz gyro LPF,
+# 500 Hz Kalman prediction. Without these definitions the stock 1 kHz ESP-Drone timing is built.
+set(FC_4K_DEFINITIONS RATE_MAIN_LOOP=4000 ATTITUDE_RATE=4000 FC_GYRO_LPF_HZ=150.0f FC_KALMAN_PREDICT_HZ=500)
 
-add_library(fc_sitl SHARED ${CF_SOURCES} ${DSP_SOURCES} ${FC_SOURCES} ${HOST_SOURCES})
+set(ALL_SOURCES ${CF_SOURCES} ${DSP_SOURCES} ${FC_SOURCES} ${HOST_SOURCES})
+
+add_library(fc_core STATIC ${ALL_SOURCES})
+fc_configure(fc_core)
+add_library(fc_core_4k STATIC ${ALL_SOURCES})
+fc_configure(fc_core_4k)
+target_compile_definitions(fc_core_4k PUBLIC ${FC_4K_DEFINITIONS})
+
+add_library(fc_sitl SHARED ${ALL_SOURCES})
 fc_configure(fc_sitl)
 target_compile_options(fc_sitl PRIVATE -O2)
+add_library(fc_sitl_4k SHARED ${ALL_SOURCES})
+fc_configure(fc_sitl_4k)
+target_compile_definitions(fc_sitl_4k PUBLIC ${FC_4K_DEFINITIONS})
+target_compile_options(fc_sitl_4k PRIVATE -O2)
 
 option(FC_SANITIZE "Build fc_core and tests with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 if(FC_SANITIZE)
-    target_compile_options(fc_core PUBLIC -fsanitize=address,undefined -fno-omit-frame-pointer)
-    target_link_options(fc_core PUBLIC -fsanitize=address,undefined)
+    foreach(lib fc_core fc_core_4k)
+        target_compile_options(${lib} PUBLIC -fsanitize=address,undefined -fno-omit-frame-pointer)
+        target_link_options(${lib} PUBLIC -fsanitize=address,undefined)
+    endforeach()
 endif()
 
 option(FC_COVERAGE "Instrument fc_core for gcov-style coverage (use with gcovr)" OFF)

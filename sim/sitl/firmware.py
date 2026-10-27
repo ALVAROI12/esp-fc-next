@@ -18,7 +18,12 @@ import threading
 REPO = Path(__file__).resolve().parents[2]
 SOURCE_DIRS = [REPO / "firmware/fc_core", REPO / "firmware/flight/components/core/crazyflie"]
 BUILD_DIR = REPO / "build/fc_sitl"
-LIB_NAME = "libfc_sitl.dylib" if sys.platform == "darwin" else "libfc_sitl.so"
+LIB_EXT = ".dylib" if sys.platform == "darwin" else ".so"
+
+# Library variants (firmware/fc_core/CMakeLists.txt): stock 1 kHz timing and the planned 4 kHz timing.
+VARIANTS = {"1k": "fc_sitl", "4k": "fc_sitl_4k"}
+# Board profiles (firmware/fc_core/src/fc_profile.c) and the variant they were designed for.
+PROFILE_VARIANT = {"stock": "1k", "whoop2_interim": "1k", "whoop2_4k": "4k"}
 
 PHASE_CALIBRATING = 0
 PHASE_READY = 1
@@ -37,16 +42,17 @@ def _newest_source_mtime() -> float:
     return newest
 
 
-def library_path(rebuild: bool | None = None) -> Path:
-    """Path to the SITL library, (re)building it with CMake when missing or older than the sources."""
-    lib = BUILD_DIR / LIB_NAME
+def library_path(variant: str = "1k", rebuild: bool | None = None) -> Path:
+    """Path to a SITL library variant, (re)building it with CMake when missing or older than the sources."""
+    target = VARIANTS[variant]
+    lib = BUILD_DIR / f"lib{target}{LIB_EXT}"
     with _build_lock:
         stale = not lib.exists() or lib.stat().st_mtime < _newest_source_mtime()
         if rebuild or (rebuild is None and stale):
             generator = ["-G", "Ninja"] if shutil.which("ninja") else []
             subprocess.run(["cmake", "-S", str(REPO / "firmware/fc_core"), "-B", str(BUILD_DIR), *generator,
                             "-DCMAKE_BUILD_TYPE=Release"], check=True, stdout=subprocess.DEVNULL)
-            subprocess.run(["cmake", "--build", str(BUILD_DIR), "--target", "fc_sitl"], check=True,
+            subprocess.run(["cmake", "--build", str(BUILD_DIR), "--target", target], check=True,
                            stdout=subprocess.DEVNULL)
     return lib
 
@@ -56,13 +62,11 @@ class FirmwareError(RuntimeError):
 
 
 class FlightFirmware:
-    """One instance of the flight firmware. Call step() once per 1 ms tick."""
+    """One instance of the flight firmware. Call step() once per main-loop tick (rate_hz)."""
 
-    RATE_HZ = 1000
-
-    def __init__(self, log_level: int = 1):
+    def __init__(self, variant: str = "1k", log_level: int = 1):
         global _instance_count
-        src = library_path()
+        src = library_path(variant)
         _instance_count += 1
         copy = _instance_dir / f"{src.stem}_{os.getpid()}_{_instance_count}{src.suffix}"
         shutil.copy2(src, copy)
@@ -72,13 +76,19 @@ class FlightFirmware:
         self._gyro = (C.c_float * 3)()
         self._acc = (C.c_float * 3)()
         self._state = (C.c_float * 13)()
+        self.variant = variant
+        self.rate_hz = int(self._lib.fc_rate_hz())
         self.init()
 
     def _declare(self) -> None:
         f, u16, u32, b = C.c_float, C.c_uint16, C.c_uint32, C.c_bool
         sig = {
             "fc_init": (None, []),
-            "fc_arm": (None, [b]),
+            "fc_arm": (b, [b]),
+            "fc_rate_hz": (u32, []),
+            "fc_is_tumbled": (b, []),
+            "fc_set_trajectory_setpoint": (None, [f] * 10),
+            "fc_profile_apply_by_name": (C.c_int, [C.c_char_p]),
             "fc_is_armed": (b, []),
             "fc_emergency_stop": (None, []),
             "fc_phase": (C.c_int, []),
@@ -107,8 +117,20 @@ class FlightFirmware:
     def init(self) -> None:
         self._lib.fc_init()
 
-    def arm(self, armed: bool = True) -> None:
-        self._lib.fc_arm(armed)
+    def arm(self, armed: bool = True) -> bool:
+        """Returns False if the supervisor refuses (not calibrated, tilted, tumbled or e-stopped)."""
+        return bool(self._lib.fc_arm(armed))
+
+    @property
+    def tumbled(self) -> bool:
+        return bool(self._lib.fc_is_tumbled())
+
+    def apply_profile(self, name: str) -> None:
+        rc = self._lib.fc_profile_apply_by_name(name.encode())
+        if rc != 0:
+            reason = {-1: "unknown profile", -2: "profile is for a different loop rate", -3: "parameter failed",
+                      -4: "stock requires a fresh firmware instance", -5: "disarm before changing profiles"}
+            raise FirmwareError(f"cannot apply profile {name}: {reason.get(rc, rc)}")
 
     @property
     def armed(self) -> bool:
@@ -129,6 +151,9 @@ class FlightFirmware:
     def set_position_setpoint(self, x: float, y: float, z: float, yaw_deg: float = 0.0) -> None:
         self._lib.fc_set_position_setpoint(x, y, z, yaw_deg)
 
+    def set_trajectory_setpoint(self, pos, vel, acc, yaw_deg: float = 0.0) -> None:
+        self._lib.fc_set_trajectory_setpoint(*pos, *vel, *acc, yaw_deg)
+
     def push_position(self, x: float, y: float, z: float, std: float) -> bool:
         return bool(self._lib.fc_push_position(x, y, z, std))
 
@@ -139,7 +164,7 @@ class FlightFirmware:
         return bool(self._lib.fc_push_flow(dpx, dpy, dt, std))
 
     def step(self, gyro_dps, acc_g, time_us: int) -> tuple[int, int, int, int]:
-        """Run one 1 kHz tick; returns the four motor ratios (0..65535)."""
+        """Run one main-loop tick; returns the four motor ratios (0..65535)."""
         self._gyro[0], self._gyro[1], self._gyro[2] = gyro_dps
         self._acc[0], self._acc[1], self._acc[2] = acc_g
         self._lib.fc_host_set_time_us(time_us)

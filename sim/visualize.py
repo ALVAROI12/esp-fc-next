@@ -22,6 +22,7 @@ from model.closed_loop import CascadedPidSim
 from model.firmware import AttitudeGains, PidGains, load_gains
 from model.params import DEFAULT_TIMING, PLANNED_TIMING, WHOOP_2IN, LoopTiming, Vehicle
 from sitl import SitlDrone
+from sitl.drone import figure8
 
 HERE = Path(__file__).resolve().parent
 TEMPLATE = HERE / "viewer" / "viewer.html"
@@ -53,6 +54,8 @@ def gust(t: float) -> np.ndarray:
 
 def load_designed_gains() -> tuple[AttitudeGains, AttitudeGains]:
     data = json.loads(GAINS_JSON.read_text())
+    if data.get("gate_passed") is not True:
+        raise ValueError("viewer requires a passing G1 gain report; run make g1")
     as_gains = lambda d: AttitudeGains(**{k: PidGains(**v) for k, v in d.items()})  # noqa: E731
     return as_gains(data["gains"]), as_gains(data["interim_gains_for_stock_timing"]["gains"])
 
@@ -82,22 +85,20 @@ def fly_g1(label: str, note: str, vehicle: Vehicle, timing: LoopTiming, gains: A
 SQUARE = [(0.5, 0.0, 1.0), (0.5, 0.5, 1.0), (0.0, 0.5, 1.0), (0.0, 0.0, 1.0)]
 
 
-def fly_sitl(label: str, note: str, color: str, z_ki: float | None) -> dict:
+def fly_sitl(label: str, note: str, color: str, profile: str) -> dict:
     """Real firmware: calibrate on the ground, arm, take off, fly a 0.5 m square, hover."""
-    d = SitlDrone(seed=4)
-    if z_ki is not None:
-        d.fw.set_param("posCtlPid.zKi", z_ki)
-    every = round(1000 / PLAYBACK_HZ)
+    d = SitlDrone(seed=4, profile=profile)
     while not d.fw.ready:
-        d.step(every)
-    d.run(0.3, every)
-    d.fw.arm(True)
+        d.step(record=False)
+    d.run(0.3, PLAYBACK_HZ)
+    if not d.fw.arm(True):
+        raise RuntimeError("supervisor refused to arm viewer scenario")
     d.takeoff(1.0, 2.0)
-    d.run(4.0, every)
+    d.run(4.0, PLAYBACK_HZ)
     for corner in SQUARE:
         d.goto(*corner, 0.0, duration=2.0)
-        d.run(3.0, every)
-    d.run(2.0, every)
+        d.run(3.0, PLAYBACK_HZ)
+    d.run(2.0, PLAYBACK_HZ)
 
     log = d.log.arrays()
     hover = log["t"] > log["t"][-1] - 2.0
@@ -112,11 +113,46 @@ def fly_sitl(label: str, note: str, color: str, z_ki: float | None) -> dict:
         "stats": (f"takeoff overshoot {overshoot * 100:.1f} cm | estimator error max {est_err * 100:.1f} cm | "
                   f"asserts {d.fw.assert_count} | posCtlPid.zKi = {d.fw.param('posCtlPid.zKi'):g}"),
         "lost": None,
-        "t": r(log["t"]), "pos": r(log["pos"]), "quat": r(log["quat"], 5), "motors": r(log["motors"]),
+        "t": r(log["t"] - log["t"][0]), "pos": r(log["pos"]), "quat": r(log["quat"], 5), "motors": r(log["motors"]),
         "series": {
             "z": r(log["pos"][:, 2]), "z_sp": r(sp[:, 2]), "x": r(log["pos"][:, 0]), "x_sp": r(sp[:, 0]),
             "y": r(log["pos"][:, 1]), "y_sp": r(sp[:, 1]), "m1": r(log["motors"][:, 0] * 100, 2),
         },
+    }
+
+
+def fly_tracking(label: str, color: str, profile: str, positioning: str = "mocap") -> dict:
+    """A figure-8 comparison, or the unresolved flow-only absolute-position check."""
+    d = SitlDrone(seed=5, profile=profile, positioning=positioning)
+    d.calibrate_and_arm()
+    d.takeoff(1.0, 2.0)
+    d.run(4.0, record_hz=None)
+    start = d.time
+    if positioning == "mocap":
+        d.follow(figure8(start, np.array([0.0, 0.0, 1.0]), 0.6, 8.0))
+    d.run(20.0 if positioning == "flow" else 16.0, record_hz=PLAYBACK_HZ)
+    log = d.log.arrays()
+    t = log["t"] - start
+    reference = log["setpoint"]
+    if positioning == "flow":
+        # Drift from the initial hover point, not from an unknowable global flow coordinate.
+        reference = np.tile([*log["pos"][0, :2], 1.0], (len(t), 1))
+    error = np.linalg.norm(log["pos"] - reference, axis=1)
+    window = t > 2.0 if positioning == "mocap" else np.ones(len(t), dtype=bool)
+    worst = float(error[window].max())
+    gate = 0.1 if positioning == "mocap" else 0.05
+    ok = worst < gate and d.fw.assert_count == 0 and not d.fw.tumbled
+    return {
+        "label": label, "color": color,
+        "note": f"{profile}; {d.rate} Hz flight loop; {positioning} positioning. Simulated, not hardware validated.",
+        "status": "ok" if ok else "bad", "badge": "tracking check passed" if ok else "accuracy NOT met",
+        "stats": f"max 3D error {100 * worst:.1f} cm (limit {100 * gate:g} cm) | asserts {d.fw.assert_count}",
+        "lost": None,
+        "t": r(t - t[0]), "pos": r(log["pos"]), "quat": r(log["quat"], 5), "motors": r(log["motors"]),
+        "series": {"error": r(error * 100, 2), "z": r(log["pos"][:, 2]),
+                   "x": r(log["pos"][:, 0]), "x_sp": r(reference[:, 0]),
+                   "y": r(log["pos"][:, 1]), "y_sp": r(reference[:, 1]),
+                   "z_sp": r(reference[:, 2])},
     }
 
 
@@ -143,17 +179,40 @@ def scenarios() -> list[dict]:
         fleet.append(fly_g1(f"Airframe {i + 1}", note, vv, tt, proposed, COLORS[(i + 2) % len(COLORS)]))
 
     sitl = [
-        fly_sitl("Firmware as shipped", "posCtlPid defaults from the Crazyflie position controller", COLORS[0], None),
-        fly_sitl("Tuned in SITL", "posCtlPid.zKi = 0: the velocity loop integral already absorbs thrust offset", COLORS[2], 0.0),
+        fly_sitl("Reference settings", "Stock PID settings in our synchronous SITL loop (not the production scheduler)", COLORS[0], "stock"),
+        fly_sitl("4 kHz + feedforward", "G1 gains, velocity/acceleration feedforward and landed anti-windup", COLORS[2], "whoop2_4k"),
     ]
+    tracking = [fly_tracking("Reference settings", COLORS[0], "stock"),
+                fly_tracking("4 kHz + feedforward", COLORS[2], "whoop2_4k")]
+    flow = [fly_tracking("Flow + height only", COLORS[0], "whoop2_interim", "flow")]
 
     maneuver = "Roll doublet (+15 deg, -15 deg, level) with altitude hold, then a gust (roll torque kick) at t = 2.0 s."
     return [
+        {"id": "figure8", "title": "Task 1.6: figure-8 tracking (C SITL)",
+         "description": ("Two laps of a 1.2 m-wide figure-8 with an 8 s period, at 1 m altitude. "
+                         "Both drones use 100 Hz external camera position measurements. Dashed curves are targets. "
+                         "The 10 cm check excludes the first 2 s of entry. The 4 kHz runtime is tested on this computer, "
+                         "not yet activated or timing-validated on the P4."),
+         "duration": tracking[0]["t"][-1], "spacing": 1.6, "camera": [0.6, 2.0, 4.8], "target_y": 0.85,
+         "charts": [{"title": "3D tracking error (cm)", "series": "error"},
+                    {"title": "x (m) - dashed: target", "series": "x", "sp": "x_sp"},
+                    {"title": "y (m) - dashed: target", "series": "y", "sp": "y_sp"}],
+         "drones": tracking},
+        {"id": "flow", "title": "Open issue FLOW-01: flow-only drift",
+         "description": ("No external camera position measurements. Optical flow senses velocity, not absolute XY position. "
+                         "Height stays near 1 m, but XY noise integrates into drift. This does NOT pass the 5 cm "
+                         "positioning requirement. Sensor noise is assumed; hardware measurements are still required."),
+         "duration": flow[0]["t"][-1], "camera": [1.0, 2.0, 3.2], "target_y": 0.85,
+         "charts": [{"title": "Position drift (cm)", "series": "error"},
+                    {"title": "Height (m) - dashed: target", "series": "z", "sp": "z_sp"},
+                    {"title": "x (m) - dashed: initial hover position", "series": "x", "sp": "x_sp"}],
+         "drones": flow},
         {"id": "sitl", "title": "G2 SITL: real firmware, takeoff + square",
          "description": ("The actual C flight firmware (fc_step: calibration, Kalman filter with 100 Hz mocap, position "
                          "controller, cascaded PID, mixer) flying the 6-DOF model with ICM-42688-P noise. Calibrates on "
                          "the ground, arms, takes off along a 2 s minimum-jerk path, flies a 0.5 m square at 1 m, hovers. "
-                         "Left: firmware defaults; right: one parameter changed after the SITL diagnosis."),
+                          "Left: reference settings in the synchronous loop; right: the 4 kHz board profile. "
+                          "Not a hardware flight validation."),
          "duration": round(sitl[0]["t"][-1], 2), "spacing": 1.3, "camera": [0.6, 1.9, 3.4], "target_y": 0.7,
          "charts": [
              {"title": "Height z (m) - dashed: setpoint", "series": "z", "sp": "z_sp"},

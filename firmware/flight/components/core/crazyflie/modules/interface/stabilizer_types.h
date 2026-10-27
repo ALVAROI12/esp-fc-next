@@ -260,6 +260,7 @@ typedef struct {
 // } sweepAngleMeasurement_t;
 
 // Frequencies to bo used with the RATE_DO_EXECUTE_HZ macro. Do NOT use an arbitrary number.
+#define RATE_4000_HZ 4000
 #define RATE_1000_HZ 1000
 #define RATE_500_HZ 500
 #define RATE_250_HZ 250
@@ -267,8 +268,13 @@ typedef struct {
 #define RATE_50_HZ 50
 #define RATE_25_HZ 25
 
+// ESP-FC Next: overridable so the P4 build can run the main and attitude loops at 4 kHz.
+#ifndef RATE_MAIN_LOOP
 #define RATE_MAIN_LOOP RATE_1000_HZ
+#endif
+#ifndef ATTITUDE_RATE
 #define ATTITUDE_RATE RATE_500_HZ
+#endif
 #define POSITION_RATE RATE_100_HZ
 
 #define RATE_DO_EXECUTE(RATE_HZ, TICK) ((TICK % (RATE_MAIN_LOOP / RATE_HZ)) == 0)

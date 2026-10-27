@@ -12,13 +12,26 @@
 #include "kalman_core.h"
 #include "kalman_supervisor.h"
 #include "log.h"
+#include "fc_step.h"
 #include "physicalConstants.h"
 
-#define TICKS_PER_SECOND 1000.0f
-#define PREDICT_EVERY_TICKS 10 /* PREDICT_RATE = 100 Hz */
+/* Prediction rate: 100 Hz in estimator_kalman.c (CPU-limited on the STM32); the P4 build runs 500 Hz. */
+#ifndef FC_KALMAN_PREDICT_HZ
+#define FC_KALMAN_PREDICT_HZ 100
+#endif
+
+#define TICKS_PER_SECOND ((float)FC_STEP_RATE_HZ)
+#define PREDICT_EVERY_TICKS (FC_STEP_RATE_HZ / FC_KALMAN_PREDICT_HZ)
+/*
+ * kalmanCoreAddProcessNoise() adds a per-call squared term rather than a rate-consistent one, so it
+ * is tuned for being called every 1 ms. Keep that cadence regardless of the main-loop rate.
+ */
+#define PROCESS_NOISE_EVERY_TICKS (FC_STEP_RATE_HZ >= 1000 ? FC_STEP_RATE_HZ / 1000 : 1)
 #define CONTROL_TO_ACC (GRAVITY_MAGNITUDE * 60.0f / (CF_MASS * 1000.0f) / 65536.0f)
 #define IN_FLIGHT_THRUST_THRESHOLD (GRAVITY_MAGNITUDE * 0.1f)
-#define IN_FLIGHT_TIME_THRESHOLD 500 /* ticks */
+#define IN_FLIGHT_TIME_THRESHOLD FC_MS_TO_TICKS(500)
+
+_Static_assert(FC_STEP_RATE_HZ % FC_KALMAN_PREDICT_HZ == 0, "prediction rate must divide the loop rate");
 
 /* ---- fixed-size measurement queues (no dynamic allocation) ---- */
 
@@ -139,7 +152,7 @@ void fcKalmanUpdate(state_t *state, const sensorData_t *sensors, const control_t
     }
 
     float pnDt = (tick - lastProcessNoise) / TICKS_PER_SECOND;
-    if (pnDt > 0.0f) {
+    if (pnDt > 0.0f && (tick - lastProcessNoise) >= PROCESS_NOISE_EVERY_TICKS) {
         kalmanCoreAddProcessNoise(&coreData, pnDt);
         lastProcessNoise = tick;
     }

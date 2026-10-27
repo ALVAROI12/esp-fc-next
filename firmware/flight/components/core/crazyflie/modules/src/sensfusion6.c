@@ -27,6 +27,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "sdkconfig.h"
 #include "sensfusion6.h"
 #include "log.h"
 #include "param.h"
@@ -293,16 +294,22 @@ float sensfusion6GetInvThrustCompensationForTilt()
 // See: http://en.wikipedia.org/wiki/Fast_inverse_square_root
 float invSqrt(float x)
 {
+#ifdef CONFIG_IDF_TARGET_ESP32S2
+  // Fast inverse square root (one Newton step, ~0.175% error) for the FPU-less ESP32-S2.
+  // 32-bit integer + memcpy: `long` is 64-bit on PC hosts and the pointer cast was undefined behavior.
   float halfx = 0.5f * x;
   float y = x;
-  // ESP-FC Next: 32-bit integer + memcpy. `long` is 64-bit on PC hosts, which read past
-  // `y` and returned garbage in SITL; the pointer cast was also undefined behavior.
   int32_t i;
   memcpy(&i, &y, sizeof(i));
   i = 0x5f3759df - (i>>1);
   memcpy(&y, &i, sizeof(y));
   y = y * (1.5f - (halfx * y * y));
   return y;
+#else
+  // ESP-FC Next: exact. ESP32, S3 and P4 have a hardware FPU, so this costs about the same and
+  // keeps the attitude quaternion unit-length.
+  return 1.0f / sqrtf(x);
+#endif
 }
 
 static float sensfusion6GetAccZ(const float ax, const float ay, const float az)

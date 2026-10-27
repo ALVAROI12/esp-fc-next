@@ -1,38 +1,57 @@
-"""One simulated drone: 6-DOF physics + sensor models + the real flight firmware, in 1 ms lockstep."""
+"""One simulated drone: 6-DOF physics + sensor models + the real flight firmware, in main-loop lockstep."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 import math
+from typing import Callable
 
 import numpy as np
 
-from model.dynamics import Quadrotor, State, quat_to_euler
+from model.dynamics import Quadrotor, State, quat_to_euler, quat_to_rot
 from model.params import DEFAULT_SENSORS, WHOOP_2IN, Sensors, Vehicle
-from model.sensors import ImuModel, MocapModel
+from model.sensors import FlowModel, ImuModel, MocapModel, TofModel
 
-from .firmware import FlightFirmware
+from .firmware import PROFILE_VARIANT, FlightFirmware
 
 RATIO_FULL_SCALE = 65535.0
 MOCAP_STD_REPORTED = 0.01  # m, std passed to the estimator (Crazyswarm extPosStdDev default)
+TOF_STD_REPORTED = 0.01  # m
+FLOW_STD_REPORTED = 2.0  # pixels (Crazyflie flowdeck default)
 SETPOINT_RATE_HZ = 100  # ground-station setpoint rate
+FLOW_RATE_HZ = 100
+TOF_RATE_HZ = 50
+
+# A trajectory maps time (s) to (position xyz, velocity xyz, acceleration xyz, yaw deg).
+Trajectory = Callable[[float], tuple[np.ndarray, np.ndarray, np.ndarray, float]]
 
 
-@dataclass
-class Segment:
-    """Minimum-jerk move from p0 to p1 (x, y, z, yaw) starting at t0, like Crazyswarm goTo/takeoff."""
-
-    t0: float
-    duration: float
-    p0: np.ndarray
-    p1: np.ndarray
-
-    def at(self, t: float) -> np.ndarray:
-        if self.duration <= 0.0:
-            return self.p1
-        s = min(1.0, max(0.0, (t - self.t0) / self.duration))
+def min_jerk(t0: float, duration: float, p0: np.ndarray, p1: np.ndarray, yaw: float) -> Trajectory:
+    """Minimum-jerk move like Crazyswarm goTo/takeoff, with velocity and acceleration for feedforward."""
+    def traj(t: float):
+        if duration <= 0.0:
+            return p1, np.zeros(3), np.zeros(3), yaw
+        s = min(1.0, max(0.0, (t - t0) / duration))
+        inside = 0.0 < s < 1.0
         blend = s ** 3 * (10 - 15 * s + 6 * s * s)
-        return self.p0 + (self.p1 - self.p0) * blend
+        dblend = (30 * s * s - 60 * s ** 3 + 30 * s ** 4) / duration if inside else 0.0
+        ddblend = (60 * s - 180 * s * s + 120 * s ** 3) / duration ** 2 if inside else 0.0
+        d = p1 - p0
+        return p0 + d * blend, d * dblend, d * ddblend, yaw
+    return traj
+
+
+def figure8(t0: float, center: np.ndarray, size: float, period: float) -> Trajectory:
+    """Lissajous figure-8 in the horizontal plane: x = A sin(wt), y = A/2 sin(2wt)."""
+    w = 2 * math.pi / period
+
+    def traj(t: float):
+        tau = max(0.0, t - t0)
+        pos = center + np.array([size * math.sin(w * tau), 0.5 * size * math.sin(2 * w * tau), 0.0])
+        vel = np.array([size * w * math.cos(w * tau), size * w * math.cos(2 * w * tau), 0.0])
+        acc = np.array([-size * w * w * math.sin(w * tau), -2 * size * w * w * math.sin(2 * w * tau), 0.0])
+        return pos, vel, acc, 0.0
+    return traj
 
 
 @dataclass
@@ -50,33 +69,46 @@ class Log:
 
 
 class SitlDrone:
+    """positioning: "mocap" (100 Hz external position) or "flow" (PMW3901 flow + VL53L1X ToF)."""
+
     def __init__(
         self,
         vehicle: Vehicle = WHOOP_2IN,
         sensors: Sensors = DEFAULT_SENSORS,
         start: tuple[float, float, float] = (0.0, 0.0, 0.0),
         seed: int = 0,
-        mocap: bool = True,
-        substeps: int = 2,
+        profile: str = "stock",
+        positioning: str = "mocap",
         thrust_base: float | None = None,
     ):
         self.vehicle = vehicle
         self.rng = np.random.default_rng(seed)
-        self.dt = 1.0 / FlightFirmware.RATE_HZ
-        self.substeps = substeps
+        self.fw = FlightFirmware(PROFILE_VARIANT[profile])
+        self.fw.apply_profile(profile)
+        if profile == "stock" or thrust_base is not None:
+            # The stock firmware has no airframe profile: at least give it this airframe's hover throttle.
+            self.fw.set_param("posCtlPid.thrustBase",
+                              thrust_base if thrust_base is not None else vehicle.hover_command * RATIO_FULL_SCALE)
+        self.rate = self.fw.rate_hz
+        self.dt = 1.0 / self.rate
+        self.substeps = max(1, round(2000 / self.rate))  # physics step <= 0.5 ms
         self.quad = Quadrotor(vehicle, State(pos=np.array(start, dtype=float)), ground=True)
-        self.imu = ImuModel(sensors.imu, FlightFirmware.RATE_HZ, self.rng)
-        self.mocap_every = round(FlightFirmware.RATE_HZ / sensors.mocap.rate_hz)
-        # MocapModel counts latency in calls, and it is sampled every mocap_every ticks.
-        self.mocap = MocapModel(sensors.mocap, self.rng, self.mocap_every * self.dt) if mocap else None
-        self.fw = FlightFirmware()
-        # Board-profile value: the position controller's hover throttle for this airframe.
-        self.fw.set_param("posCtlPid.thrustBase",
-                          thrust_base if thrust_base is not None else vehicle.hover_command * RATIO_FULL_SCALE)
+        self.imu = ImuModel(sensors.imu, self.rate, self.rng)
+        self.positioning = positioning
+        self.every = {
+            "mocap": round(self.rate / sensors.mocap.rate_hz),
+            "setpoint": round(self.rate / SETPOINT_RATE_HZ),
+            "flow": round(self.rate / FLOW_RATE_HZ),
+            "tof": round(self.rate / TOF_RATE_HZ),
+        }
+        # MocapModel counts latency in calls, and it is sampled every `every["mocap"]` ticks.
+        self.mocap = MocapModel(sensors.mocap, self.rng, self.every["mocap"] * self.dt) if positioning == "mocap" else None
+        self.flow = FlowModel(sensors.flow, self.rng) if positioning == "flow" else None
+        self.tof = TofModel(sensors.tof, self.rng) if positioning == "flow" else None
         self.command = np.zeros(4)
         self.tick = 0
-        self.segment: Segment | None = None
-        self.target: tuple[float, float, float, float] | None = None  # current x, y, z, yaw setpoint
+        self.trajectory: Trajectory | None = None
+        self.target: tuple[float, float, float, float] | None = None  # last sent x, y, z, yaw
         self.link_up = True
         self.log = Log()
 
@@ -84,38 +116,60 @@ class SitlDrone:
     def time(self) -> float:
         return self.tick * self.dt
 
+    # ---- ground-station commands ----
+    def follow(self, trajectory: Trajectory) -> None:
+        self.trajectory = trajectory
+
     def goto(self, x: float, y: float, z: float, yaw_deg: float = 0.0, duration: float = 0.0) -> None:
         """Fly to a point along a minimum-jerk path (duration 0 = step setpoint)."""
-        start = np.array(self.target) if self.target else np.array([*self.quad.state.pos, 0.0])
-        self.segment = Segment(self.time, duration, start, np.array([x, y, z, yaw_deg], dtype=float))
+        start = np.array(self.target[:3]) if self.target else self.quad.state.pos.copy()
+        self.follow(min_jerk(self.time, duration, start, np.array([x, y, z], dtype=float), yaw_deg))
 
     def takeoff(self, height: float, duration: float = 2.0) -> None:
         p = self.quad.state.pos
         self.goto(p[0], p[1], height, 0.0, duration)
 
-    @property
-    def move_done(self) -> bool:
-        return self.segment is None or self.time >= self.segment.t0 + self.segment.duration
+    def calibrate_and_arm(self, timeout: float = 3.0) -> None:
+        """Sit still until the firmware finishes gyro/accel calibration, then arm."""
+        while not self.fw.ready:
+            if self.time > timeout:
+                raise RuntimeError("firmware did not finish calibration")
+            self.step(record=False)
+        if not self.fw.arm(True):
+            raise RuntimeError("firmware refused to arm")
 
-    def step(self, record_every: int = 1) -> None:
+    # ---- simulation ----
+    def _sensors(self) -> None:
         s = self.quad.state
-        gyro, acc = self.imu.sample(s.omega, self.quad.specific_force_body(self.command))
+        rot = quat_to_rot(s.quat)
+        if self.mocap and self.tick % self.every["mocap"] == 0:
+            self.fw.push_position(*self.mocap.sample(s.pos), MOCAP_STD_REPORTED)
+        if self.flow and self.tick % self.every["flow"] == 0:
+            m = self.flow.sample(s.pos[2], s.vel, rot, s.omega, self.every["flow"] * self.dt)
+            if m:
+                self.fw.push_flow(m[0], m[1], self.every["flow"] * self.dt, FLOW_STD_REPORTED)
+        if self.tof and self.tick % self.every["tof"] == 0:
+            d = self.tof.sample(s.pos[2], rot)
+            if d is not None and s.pos[2] > 0.03:
+                self.fw.push_tof(d, TOF_STD_REPORTED)
 
-        if self.mocap and self.tick % self.mocap_every == 0:
-            p = self.mocap.sample(s.pos)
-            self.fw.push_position(*p, MOCAP_STD_REPORTED)
-        if self.segment and self.tick % (FlightFirmware.RATE_HZ // SETPOINT_RATE_HZ) == 0:
-            self.target = tuple(self.segment.at(self.time))
+    def step(self, record: bool = True) -> None:
+        s = self.quad.state
+        imu_gyro, imu_acc = self.imu.sample(s.omega, self.quad.specific_force_body(self.command))
+        self._sensors()
+        if self.trajectory and self.tick % self.every["setpoint"] == 0:
+            sp_pos, sp_vel, sp_acc, sp_yaw = self.trajectory(self.time)
+            self.target = (*sp_pos, sp_yaw)
             if self.link_up:
-                self.fw.set_position_setpoint(*self.target)
+                self.fw.set_trajectory_setpoint(sp_pos, sp_vel, sp_acc, sp_yaw)
 
-        ratios = self.fw.step(gyro, acc, int(self.tick * 1e6 * self.dt))
+        ratios = self.fw.step(imu_gyro, imu_acc, int(self.tick * 1e6 * self.dt))
         self.command = np.array(ratios) / RATIO_FULL_SCALE
         for _ in range(self.substeps):
             self.quad.step(self.command, self.dt / self.substeps)
         self.tick += 1
 
-        if self.tick % record_every == 0:
+        if record:
             st = self.quad.state
             est = self.fw.state()
             self.log.t.append(self.time)
@@ -126,14 +180,8 @@ class SitlDrone:
             self.log.setpoint.append(list(self.target[:3]) if self.target else [math.nan] * 3)
             self.log.motors.append(self.command.copy())
 
-    def run(self, seconds: float, record_every: int = 1) -> None:
+    def run(self, seconds: float, record_hz: float | None = 250.0) -> None:
+        """Advance `seconds`; log at record_hz (None = no logging)."""
+        every = 0 if record_hz is None else max(1, round(self.rate / record_hz))
         for _ in range(int(round(seconds / self.dt))):
-            self.step(record_every)
-
-    def calibrate_and_arm(self, timeout: float = 3.0) -> None:
-        """Sit still until the firmware finishes gyro/accel calibration, then arm."""
-        while not self.fw.ready:
-            if self.time > timeout:
-                raise RuntimeError("firmware did not finish calibration")
-            self.step()
-        self.fw.arm(True)
+            self.step(record=bool(every) and (self.tick + 1) % every == 0)

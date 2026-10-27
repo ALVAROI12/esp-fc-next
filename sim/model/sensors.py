@@ -6,7 +6,7 @@ import math
 
 import numpy as np
 
-from .params import G, Baro, Imu, Mocap, Tof
+from .params import G, Baro, Flow, Imu, Mocap, Tof
 
 
 def white_noise_std(density: float, sample_rate_hz: float) -> float:
@@ -66,6 +66,33 @@ class TofModel:
         if distance > self.spec.max_range:
             return None
         return max(0.0, distance + self.rng.normal(0.0, self.spec.std))
+
+
+class FlowModel:
+    """PMW3901 optical flow: accumulated pixel counts over `dt`, generated with the same measurement
+    model the firmware's Kalman filter uses (kalman_core.c kalmanCoreUpdateWithFlow: Npix = 30,
+    thetapix = 4.2 deg, empirical rotation factor 1.25), plus white pixel noise."""
+
+    NPIX = 30.0
+    THETAPIX = math.radians(4.2)
+    OMEGA_FACTOR = 1.25
+    MIN_HEIGHT = 0.08  # m, below this the sensor is out of focus and reports nothing
+
+    def __init__(self, spec: Flow, rng: np.random.Generator):
+        self.spec = spec
+        self.rng = rng
+
+    def sample(self, height: float, vel_world: np.ndarray, rot_body_to_world: np.ndarray,
+               omega_body_rad: np.ndarray, dt: float) -> tuple[float, float] | None:
+        r22 = rot_body_to_world[2, 2]
+        if height < self.MIN_HEIGHT or r22 <= 0.1:
+            return None
+        v_body = rot_body_to_world.T @ vel_world
+        k = dt * self.NPIX / self.THETAPIX
+        nx = k * (v_body[0] * r22 / height - self.OMEGA_FACTOR * omega_body_rad[1])
+        ny = k * (v_body[1] * r22 / height + self.OMEGA_FACTOR * omega_body_rad[0])
+        noise = self.rng.normal(0.0, self.spec.std_pixels, 2)
+        return float(nx + noise[0]), float(ny + noise[1])
 
 
 class MocapModel:

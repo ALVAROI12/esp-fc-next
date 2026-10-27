@@ -5,6 +5,10 @@ Derived from [Espressif ESP-Drone](https://github.com/espressif/esp-drone) (Craz
 
 The full plan, gap analysis and gates are in [`docs/ESP-FC-Next_Project_Plan.pdf`](docs/ESP-FC-Next_Project_Plan.pdf).
 
+**Current status:** 1/4 kHz host/SITL variants and trajectory feedforward are tested in simulation.
+The production P4 image still uses ESP-Drone's original task loop; the new runtime has not been
+activated or timing-validated on hardware. Flow-only absolute XY positioning remains an open failure.
+
 ## Layout
 
 | Path | Contents |

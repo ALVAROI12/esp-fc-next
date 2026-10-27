@@ -179,15 +179,22 @@ def main() -> int:
         "Linear and nonlinear overshoot agree within 5 points": abs(lin_p.overshoot_pct - nl_p) <= 5.0,
         "Hover with ICM-42688-P noise: attitude RMS < 0.5 deg": att_rms < 0.5,
         "Tuned gains are interior to their search grids": not robust.GRID_EDGE_HITS,
+        "Interim profile nominal and sampled margins": mc_interim.passed and
+            all(m.passes(robust.GATE_PM_DEG, robust.GATE_GM_DB) for m in interim_nominal.values()),
     }
     gate_pass = all(checks.values())
 
     (args.out / "proposed_gains.json").write_text(json.dumps({
+        "gate_passed": gate_pass,
         "airframe": "2-inch ducted 1S whoop (assumed parameters, see README)",
         "timing": asdict(PLANNED_TIMING),
         "gains": asdict(proposed),
         "interim_gains_for_stock_timing": {"timing": asdict(DEFAULT_TIMING), "gains": asdict(interim)},
     }, indent=2) + "\n")
+
+    if args.out == OUT and gate_pass:
+        import gen_profile_header
+        gen_profile_header.main()  # keep the firmware's board profiles in sync with these gains
 
     if not args.no_plots:
         plots(args.out,

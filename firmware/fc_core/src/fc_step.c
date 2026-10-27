@@ -10,16 +10,16 @@
 #include <string.h>
 
 #include "controller.h"
+#include "controller_pid.h"
 #include "fc_kalman.h"
 #include "filter.h"
 #include "log.h"
 #include "param.h"
+#include "position_controller.h"
 #include "power_distribution.h"
 #include "usec_time.h"
 
-/* Sensor pre-processing, as in sensors_mpu6050_hm5883L_ms5611.c */
-#define GYRO_LPF_CUTOFF_HZ 80.0f
-#define ACCEL_LPF_CUTOFF_HZ 30.0f
+/* Sensor pre-processing, as in sensors_mpu6050_hm5883L_ms5611.c (cutoffs in fc_step.h) */
 #define BIAS_SAMPLES 1024              /* SENSORS_NBR_OF_BIAS_SAMPLES */
 #define BIAS_MAX_STD_DPS 4.0f          /* about GYRO_VARIANCE_BASE at +/-2000 dps full scale */
 #define ACC_SCALE_SAMPLES 200          /* SENSORS_ACC_SCALE_SAMPLES */
@@ -28,6 +28,10 @@ static struct {
     uint32_t tick;
     bool armed;
     bool emergencyStop;
+    bool tumbled;
+    uint32_t tumbleTicks;
+    bool airborne;      /* latched once the estimate rises FC_LIFTOFF_HEIGHT_M above the arming height */
+    float groundZ;
     uint8_t phase; /* fc_phase_t, stored as one byte for the LOG table */
 
     /* calibration */
@@ -48,6 +52,7 @@ static struct {
     uint32_t setpointTick;
     bool haveSetpoint;
 } fc;
+static bool controllerInitialized;
 
 void fc_init(void)
 {
@@ -55,18 +60,56 @@ void fc_init(void)
     fc.phase = FC_PHASE_CALIBRATING;
     fc.accScale = 1.0f;
     for (int i = 0; i < 3; i++) {
-        lpf2pInit(&fc.gyroLpf[i], FC_STEP_RATE_HZ, GYRO_LPF_CUTOFF_HZ);
-        lpf2pInit(&fc.accLpf[i], FC_STEP_RATE_HZ, ACCEL_LPF_CUTOFF_HZ);
+        lpf2pInit(&fc.gyroLpf[i], FC_STEP_RATE_HZ, FC_GYRO_LPF_HZ);
+        lpf2pInit(&fc.accLpf[i], FC_STEP_RATE_HZ, FC_ACCEL_LPF_HZ);
     }
     fc.state.attitudeQuaternion.w = 1.0f;
     fcKalmanInit();
-    controllerInit(ControllerTypePID);
+    if (!controllerInitialized) {
+        controllerInit(ControllerTypePID);
+        controllerInitialized = true;
+    }
+    controllerPidReset(&fc.state);
     powerDistributionInit();
     powerStop();
 }
 
-void fc_arm(bool armed) { fc.armed = armed; }
+uint32_t fc_rate_hz(void) { return FC_STEP_RATE_HZ; }
+
+static float tilt_deg(void)
+{
+    /* angle between body z and world z from the estimated quaternion */
+    const quaternion_t *q = &fc.state.attitudeQuaternion;
+    float r22 = 1.0f - 2.0f * (q->x * q->x + q->y * q->y);
+    if (r22 > 1.0f) r22 = 1.0f;
+    if (r22 < -1.0f) r22 = -1.0f;
+    return acosf(r22) * 57.29578f;
+}
+
+bool fc_arm(bool armed)
+{
+    if (!armed) {
+        fc.armed = false;
+        return true;
+    }
+    // The estimator starts level and may not have converged immediately after calibration.
+    // Check measured gravity as well, so a tilted/inverted stationary vehicle cannot arm.
+    float ax = fc.sensors.acc.x, ay = fc.sensors.acc.y, az = fc.sensors.acc.z;
+    float norm = sqrtf(ax * ax + ay * ay + az * az);
+    if (fc.phase != FC_PHASE_READY || fc.emergencyStop || fc.tumbled ||
+        !isfinite(norm) || norm < 0.8f || norm > 1.2f ||
+        az / norm < cosf(FC_ARM_MAX_TILT_DEG * 0.0174532925f) || tilt_deg() > FC_ARM_MAX_TILT_DEG) {
+        return false;
+    }
+    if (fc.armed) return true; /* idempotent: do not reset the lift-off reference midflight */
+    fc.armed = true;
+    fc.airborne = false;
+    fc.groundZ = fc.state.position.z;
+    return true;
+}
+
 bool fc_is_armed(void) { return fc.armed; }
+bool fc_is_tumbled(void) { return fc.tumbled; }
 void fc_emergency_stop(void) { fc.emergencyStop = true; }
 fc_phase_t fc_phase(void) { return (fc_phase_t)fc.phase; }
 uint32_t fc_tick(void) { return fc.tick; }
@@ -91,6 +134,26 @@ void fc_set_position_setpoint(float x, float y, float z, float yaw_deg)
     sp.position.x = x;
     sp.position.y = y;
     sp.position.z = z;
+    sp.attitude.yaw = yaw_deg;
+    fc_set_setpoint(&sp);
+}
+
+void fc_set_trajectory_setpoint(float x, float y, float z, float vx, float vy, float vz,
+                                float ax, float ay, float az, float yaw_deg)
+{
+    setpoint_t sp;
+    memset(&sp, 0, sizeof(sp));
+    sp.mode.x = sp.mode.y = sp.mode.z = modeAbs;
+    sp.mode.yaw = modeAbs;
+    sp.position.x = x;
+    sp.position.y = y;
+    sp.position.z = z;
+    sp.velocity.x = vx;
+    sp.velocity.y = vy;
+    sp.velocity.z = vz;
+    sp.acceleration.x = ax;
+    sp.acceleration.y = ay;
+    sp.acceleration.z = az;
     sp.attitude.yaw = yaw_deg;
     fc_set_setpoint(&sp);
 }
@@ -149,11 +212,11 @@ static void apply_watchdog(void)
 {
     static const setpoint_t nullSetpoint;
     uint32_t age = fc.tick - fc.setpointTick;
-    if (!fc.haveSetpoint || age > FC_SETPOINT_TIMEOUT_SHUTDOWN_MS) {
+    if (!fc.haveSetpoint || age > FC_MS_TO_TICKS(FC_SETPOINT_TIMEOUT_SHUTDOWN_MS)) {
         fc.activeSetpoint = nullSetpoint;
     } else {
         fc.activeSetpoint = fc.setpoint;
-        if (age > FC_SETPOINT_TIMEOUT_STABILIZE_MS) {
+        if (age > FC_MS_TO_TICKS(FC_SETPOINT_TIMEOUT_STABILIZE_MS)) {
             fc.activeSetpoint.mode.x = modeDisable;
             fc.activeSetpoint.mode.y = modeDisable;
             fc.activeSetpoint.mode.roll = modeAbs;
@@ -162,6 +225,8 @@ static void apply_watchdog(void)
             fc.activeSetpoint.attitude.roll = 0;
             fc.activeSetpoint.attitude.pitch = 0;
             fc.activeSetpoint.attitudeRate.yaw = 0;
+            memset(&fc.activeSetpoint.velocity, 0, sizeof(fc.activeSetpoint.velocity));
+            memset(&fc.activeSetpoint.acceleration, 0, sizeof(fc.activeSetpoint.acceleration));
         }
     }
 }
@@ -184,9 +249,39 @@ void fc_step(const float gyro_dps[3], const float acc_g[3])
         return;
     }
 
-    fcKalmanUpdate(&fc.state, &fc.sensors, &fc.control, fc.tick);
+    control_t appliedControl = fc.control;
+    if (!fc.armed || fc.emergencyStop) appliedControl.thrust = 0;
+    fcKalmanUpdate(&fc.state, &fc.sensors, &appliedControl, fc.tick);
     apply_watchdog();
+    if (!fc.armed || fc.emergencyStop) {
+        controllerPidReset(&fc.state);
+        memset(&fc.control, 0, sizeof(fc.control));
+        powerStop();
+        return;
+    }
+    /*
+     * Anti-windup while landed: until lift-off the vehicle cannot follow the setpoint, so position and
+     * velocity integrators would wind up and overshoot after lift-off. Proportional terms still act.
+     */
+    if (fc.armed && !fc.airborne) {
+        if (fc.state.position.z > fc.groundZ + FC_LIFTOFF_HEIGHT_M) {
+            fc.airborne = true;
+        } else {
+            positionControllerResetAllPID();
+        }
+    }
+
     controller(&fc.control, &fc.activeSetpoint, &fc.sensors, &fc.state, fc.tick);
+
+    /* Supervisor: a sustained large tilt while armed means a crash or flip -> stop motors. */
+    if (fc.armed && tilt_deg() > FC_TUMBLE_TILT_DEG) {
+        if (++fc.tumbleTicks >= FC_MS_TO_TICKS(FC_TUMBLE_TIME_MS)) {
+            fc.tumbled = true;
+            fc.armed = false;
+        }
+    } else {
+        fc.tumbleTicks = 0;
+    }
 
     if (fc.armed && !fc.emergencyStop) {
         powerDistribution(&fc.control);
@@ -210,6 +305,8 @@ void fc_get_state_array(float out[13])
 LOG_GROUP_START(fcStep)
 LOG_ADD(LOG_UINT32, tick, &fc.tick)
 LOG_ADD(LOG_UINT8, armed, &fc.armed)
+LOG_ADD(LOG_UINT8, tumbled, &fc.tumbled)
+LOG_ADD(LOG_UINT8, airborne, &fc.airborne)
 LOG_ADD(LOG_UINT8, phase, &fc.phase)
 LOG_ADD(LOG_FLOAT, biasX, &fc.gyroBias[0])
 LOG_ADD(LOG_FLOAT, biasY, &fc.gyroBias[1])

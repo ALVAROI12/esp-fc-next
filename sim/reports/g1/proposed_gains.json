@@ -1,4 +1,5 @@
 {
+  "gate_passed": true,
   "airframe": "2-inch ducted 1S whoop (assumed parameters, see README)",
   "timing": {
     "sensor_rate_hz": 4000.0,

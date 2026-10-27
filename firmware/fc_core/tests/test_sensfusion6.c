@@ -37,12 +37,8 @@ static void test_level_and_stationary_stays_level(void)
 
     float qx, qy, qz, qw;
     sensfusion6GetQuaternion(&qx, &qy, &qz, &qw);
-    /*
-     * invSqrt() is the one-Newton-step fast inverse square root (max ~0.175% error), so the
-     * quaternion is only approximately unit length. Tighten to 1e-6 once task 1.6 replaces it
-     * with 1/sqrtf() (hardware FPU on the P4).
-     */
-    TEST_ASSERT_FLOAT_WITHIN(2e-3f, 1.0f, sqrtf(qx * qx + qy * qy + qz * qz + qw * qw));
+    /* invSqrt() is exact (1/sqrtf) on FPU targets and the host since Task 1.6. */
+    TEST_ASSERT_FLOAT_WITHIN(1e-5f, 1.0f, sqrtf(qx * qx + qy * qy + qz * qz + qw * qw));
 }
 
 static void test_gyro_integrates_yaw(void)

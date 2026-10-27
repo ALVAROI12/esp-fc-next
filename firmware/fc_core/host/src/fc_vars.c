@@ -109,6 +109,12 @@ int fc_param_set(const char *group, const char *name, double value)
     return FC_VAR_OK;
 }
 
+/* Platform hook for fc_profile.c */
+int fc_platform_param_set(const char *group, const char *name, float value)
+{
+    return fc_param_set(group, name, value);
+}
+
 /* ---- logs ---- */
 
 int fc_log_get(const char *group, const char *name, double *value)
