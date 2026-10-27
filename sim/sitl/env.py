@@ -17,7 +17,7 @@ from .drone import SitlDrone
 class GotoEnv:
     """Reach a random goal within a box and hover there.
 
-    Observation (12): estimated x y z, vx vy vz (finite differences of the estimate), roll pitch yaw (rad),
+    Observation (12): estimated x y z, vx vy vz (EKF velocity estimate), roll pitch yaw (rad),
     goal - position (3). Action (3): setpoint offset from the current estimate, clipped to +/-max_step m.
     """
 
@@ -37,7 +37,6 @@ class GotoEnv:
         self.drone: SitlDrone | None = None
         self.goal = np.zeros(3)
         self.actions = 0
-        self._last_est = np.zeros(3)
 
     def _obs(self) -> np.ndarray:
         s = np.array(self.drone.fw.state(), dtype=float)

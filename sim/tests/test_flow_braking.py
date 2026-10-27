@@ -46,6 +46,8 @@ def test_flow_dropout_degrades_to_level_descent():
     {"seed": 1}, {"seed": 5}, {"flow_scale": 0.8}, {"flow_scale": 1.2},
     {"flow_latency_s": 0.02}, {"yaw_deg": 90.},
     {"sensors": replace(DEFAULT_SENSORS, flow=replace(DEFAULT_SENSORS.flow, std_pixels=4.))},
+    {"flow_model": {"omega_factor": 1.0}}, {"flow_model": {"omega_factor": 1.5}},
+    {"flow_model": {"mount_yaw_rad": 0.26}}, {"tof_bias_m": 0.02},
 ])
 def test_declared_braking_stress_envelope(changes):
     result = fly_loss("whoop2_4k", "tracking", moving=True, local_flow=True, **changes)

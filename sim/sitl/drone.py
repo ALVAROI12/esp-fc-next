@@ -150,6 +150,7 @@ class SitlDrone:
         self.flow_up = True
         self.flow_scale = 1.0  # injected calibration bias, not truth fed to control
         self.flow_latency_s = 0.0
+        self.tof_bias_m = 0.0  # mounting offset: range reads this much long at every height
         self._flow_history = deque()
         self.log = Log()
 
@@ -208,7 +209,7 @@ class SitlDrone:
         if self.tof and self.tick % self.every["tof"] == 0:
             d = self.tof.sample(s.pos[2], rot)
             if self.height_up and d is not None and (self.safe_landing or s.pos[2] > 0.03):
-                self.fw.push_tof(d, TOF_STD_REPORTED)
+                self.fw.push_tof(d + self.tof_bias_m, TOF_STD_REPORTED)
 
     def step(self, record: bool = True) -> None:
         s = self.quad.state

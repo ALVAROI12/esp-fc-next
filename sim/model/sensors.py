@@ -81,6 +81,9 @@ class FlowModel:
     def __init__(self, spec: Flow, rng: np.random.Generator):
         self.spec = spec
         self.rng = rng
+        # Structural mismatch knobs for stress runs; defaults equal the EKF's own model.
+        self.omega_factor = self.OMEGA_FACTOR
+        self.mount_yaw_rad = 0.0  # sensor axes rotated against the body axes
 
     def sample(self, height: float, vel_world: np.ndarray, rot_body_to_world: np.ndarray,
                omega_body_rad: np.ndarray, dt: float) -> tuple[float, float] | None:
@@ -89,8 +92,10 @@ class FlowModel:
             return None
         v_body = rot_body_to_world.T @ vel_world
         k = dt * self.NPIX / self.THETAPIX
-        nx = k * (v_body[0] * r22 / height - self.OMEGA_FACTOR * omega_body_rad[1])
-        ny = k * (v_body[1] * r22 / height + self.OMEGA_FACTOR * omega_body_rad[0])
+        nx = k * (v_body[0] * r22 / height - self.omega_factor * omega_body_rad[1])
+        ny = k * (v_body[1] * r22 / height + self.omega_factor * omega_body_rad[0])
+        c, sn = math.cos(self.mount_yaw_rad), math.sin(self.mount_yaw_rad)
+        nx, ny = c * nx - sn * ny, sn * nx + c * ny
         noise = self.rng.normal(0.0, self.spec.std_pixels, 2)
         return float(nx + noise[0]), float(ny + noise[1])
 

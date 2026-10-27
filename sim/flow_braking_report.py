@@ -5,6 +5,7 @@ This is not an absolute-positioning, total-height-loss, or hardware flight gate.
 """
 
 import argparse
+import math
 from dataclasses import replace
 from pathlib import Path
 
@@ -34,6 +35,10 @@ def main():
                  ("flow, yaw 90deg", True, 9, {"yaw_deg": 90.}, .50),
                  ("flow, doubled pixel noise", True, 9, {"sensors": replace(DEFAULT_SENSORS,
                      flow=replace(DEFAULT_SENSORS.flow, std_pixels=4.))}, .50),
+                 ("flow, rotation factor -20%", True, 9, {"flow_model": {"omega_factor": 1.0}}, .50),
+                 ("flow, rotation factor +20%", True, 9, {"flow_model": {"omega_factor": 1.5}}, .50),
+                 ("flow, sensor mount yaw 15deg", True, 9, {"flow_model": {"mount_yaw_rad": math.radians(15)}}, .50),
+                 ("flow, ToF reads 2 cm long", True, 9, {"tof_bias_m": .02}, .50),
                  ("flow, restored jumped camera", True, 9,
                   {"recover_after": .8, "tracking_jump": (.5, -.4, 0)}, .35)]
         for name, local_flow, seed, kwargs, limit in cases:
@@ -80,8 +85,11 @@ def main():
               "reacquisition of a jumped frame. LAND remains latched.",
               "- Nominal gate <= 0.35 m; declared sampled stress gate <= 0.50 m. Controlled-landing truth/motor "
               "checks from `failsafe_report.py` must also pass. These are not 5 cm positioning gates.",
-              "- Sensor pixel noise/calibration are synthetic. Flow equations mirror the existing EKF; "
-              "this is internal-consistency evidence, not independent sensor calibration.",
+              "- Sensor pixel noise/calibration are synthetic. Flow equations mirror the existing EKF except for the "
+              "declared structural stresses (rotation-compensation factor +/-20%, 15 deg sensor mounting yaw, "
+              "+2 cm ToF offset); this is not independent sensor calibration.",
+              "- A ToF that reads 2 cm short reports negative range on the ground, so safe mode refuses to arm "
+              "(fail-safe, but real sensors need offset calibration before flight).",
               "- Lighting, surface texture, wind, arbitrary speeds/heights, long latencies and all corruption "
               "patterns are not validated. Finite frozen sensor data is not detected by receipt freshness.",
               "- Camera+ToF loss without another qualified height source still FAULTs. This change does NOT "

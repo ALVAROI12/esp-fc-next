@@ -25,11 +25,15 @@ NAMES = ("NORMAL", "HOLD", "LAND", "LANDED", "FAULT")
 def fly_loss(profile: str, kind: str = "command", *, moving: bool = False, seed: int = 9,
              recover_after: float | None = None, tracking_jump: tuple = (0., 0., 0.),
              local_flow: bool = False, flow_scale: float = 1., flow_latency_s: float = 0.,
-             sensors: Sensors = DEFAULT_SENSORS, yaw_deg: float = 0.) -> dict:
+             sensors: Sensors = DEFAULT_SENSORS, yaw_deg: float = 0., flow_model: dict | None = None,
+             tof_bias_m: float = 0.) -> dict:
     """Drop command, camera, both, or all-height inputs independently. Record through recovery."""
     d = SitlDrone(seed=seed, profile=profile, safe_landing=True, local_flow=local_flow, sensors=sensors)
     d.flow_scale = flow_scale
     d.flow_latency_s = flow_latency_s
+    d.tof_bias_m = tof_bias_m
+    for name, value in (flow_model or {}).items():
+        setattr(d.flow, name, value)
     d.calibrate_and_arm()
     d.takeoff(1.0, 2.0)
     d.run(4.0, record_hz=None)
