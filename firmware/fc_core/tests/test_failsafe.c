@@ -566,9 +566,22 @@ static void test_emergency_stop_and_disarm_override_latched_landing(void)
     hover();
     drive(2100, true, true, false, 1);
     fc_emergency_stop();
+    TEST_ASSERT_FALSE(fc_is_armed()); /* reported state matches the motors */
     drive(100, true, true, true, 1);
     TEST_ASSERT_FALSE(motors_on());
     TEST_ASSERT_FALSE(fc_arm(true));
+}
+
+static void test_dead_accelerometer_never_completes_calibration(void)
+{
+    const float dead[3] = {0, 0, 0}, weak[3] = {0, 0, 0.3f};
+    for (unsigned i = 0; i < 2 * (1024 + 200); i++) step(STILL, dead);
+    TEST_ASSERT_EQUAL(FC_PHASE_CALIBRATING, fc_phase());
+    for (unsigned i = 0; i < 2 * (1024 + 200); i++) step(STILL, weak);
+    TEST_ASSERT_EQUAL(FC_PHASE_CALIBRATING, fc_phase());
+    for (unsigned i = 0; i < 1024 + 200; i++) step(STILL, LEVEL); /* recovers once gravity reads ~1 g */
+    TEST_ASSERT_EQUAL(FC_PHASE_READY, fc_phase());
+    TEST_ASSERT_TRUE(isfinite(fc_state()->position.z));
 }
 
 static void test_tumble_protection_remains_active_during_first_command_grace(void)
@@ -640,6 +653,7 @@ int main(void)
     RUN_TEST(test_ground_stale_or_absent_command_never_starts_landing_motors);
     RUN_TEST(test_first_command_has_bounded_arm_grace_without_motor_output);
     RUN_TEST(test_emergency_stop_and_disarm_override_latched_landing);
+    RUN_TEST(test_dead_accelerometer_never_completes_calibration);
     RUN_TEST(test_tumble_protection_remains_active_during_first_command_grace);
     RUN_TEST(test_tumble_still_overrides_landing_and_tilted_tof_is_rejected);
     return UNITY_END();

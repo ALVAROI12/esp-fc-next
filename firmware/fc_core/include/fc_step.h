@@ -46,6 +46,9 @@ extern "C" {
 #define FC_IMU_MAX_GYRO_DPS 2500.0f
 #define FC_IMU_MAX_ACC_G 30.0f
 #define FC_IMU_BAD_MAX_MS 5
+/* Plausible measured gravity at rest during accel-scale calibration (g); otherwise calibration restarts. */
+#define FC_ACC_SCALE_MIN 0.8f
+#define FC_ACC_SCALE_MAX 1.2f
 #define FC_TUMBLE_TIME_MS 300        /* ... for this long while armed -> stop motors */
 #define FC_LIFTOFF_HEIGHT_M 0.03f    /* position/velocity integrators held at zero until this high */
 
@@ -108,6 +111,7 @@ uint32_t fc_rate_hz(void);
  */
 bool fc_arm(bool armed);
 bool fc_is_armed(void);
+/* Latched motor stop and disarm; only fc_init() clears it. */
 void fc_emergency_stop(void);
 bool fc_is_tumbled(void);
 fc_phase_t fc_phase(void);

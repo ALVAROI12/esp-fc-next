@@ -224,7 +224,7 @@ bool fc_arm(bool armed)
 
 bool fc_is_armed(void) { return fc.armed; }
 bool fc_is_tumbled(void) { return fc.tumbled; }
-void fc_emergency_stop(void) { fc.emergencyStop = true; }
+void fc_emergency_stop(void) { fc.emergencyStop = true; fc.armed = false; }
 fc_phase_t fc_phase(void) { return (fc_phase_t)fc.phase; }
 uint32_t fc_tick(void) { return fc.tick; }
 const state_t *fc_state(void) { return &fc.state; }
@@ -353,8 +353,15 @@ static void calibrate(const float gyro[3], const float acc[3])
     }
     fc.accScaleSum += sqrtf(acc[0] * acc[0] + acc[1] * acc[1] + acc[2] * acc[2]);
     if (++fc.accScaleCount == ACC_SCALE_SAMPLES) {
-        fc.accScale = (float)(fc.accScaleSum / ACC_SCALE_SAMPLES);
-        fc.phase = FC_PHASE_READY;
+        float scale = (float)(fc.accScaleSum / ACC_SCALE_SAMPLES);
+        /* ESP-FC Next: a dead/miswired accelerometer (0 g -> NaN after scaling) must not finish calibration. */
+        if (isfinite(scale) && scale >= FC_ACC_SCALE_MIN && scale <= FC_ACC_SCALE_MAX) {
+            fc.accScale = scale;
+            fc.phase = FC_PHASE_READY;
+        } else {
+            fc.accScaleSum = 0;
+            fc.accScaleCount = 0;
+        }
     }
 }
 
