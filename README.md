@@ -12,12 +12,16 @@ hardware. Flow-only absolute XY positioning remains an open failure.
 
 An **opt-in latched hold-and-land supervisor** now has command/camera-loss SITL tests and a
 [report](sim/reports/failsafe/README.md). Renewed commands cannot cancel LAND. Moving camera loss
-still allows substantial XY drift; losing all height sources causes a separate fault/motor stop,
-not guaranteed safe landing. It is not collision-safe or hardware-validated.
+still allows substantial XY drift. Camera loss above the 1.3 m ToF range triggers a bounded blind descent
+in a thrust band below the learned hover thrust; permanent loss of every height source still ends in a
+fault/motor stop, not guaranteed safe landing. It is not collision-safe or hardware-validated.
 
 With qualified local flow/range, emergency velocity braking reduces nominal camera-loss excursion
 from 1.71-1.72 m to **0.28-0.29 m** in SITL ([comparison](sim/reports/flow_braking/README.md)).
 Total-height-loss recovery remains open; this does not close the absolute-positioning requirement.
+
+`make swarm` flies four firmware copies in lockstep (layers, formation, diagonal swap) with link-loss and
+camera-dropout faults; all land safely in SITL ([report](sim/reports/swarm/README.md)). No downwash or battery model.
 
 ## Layout
 

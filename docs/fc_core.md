@@ -180,8 +180,9 @@ not activate a new production P4 task loop or change any CRTP packet formats.
 | NORMAL (0) | Use mission commands; after 500 ms command silence capture current estimated pose |
 | HOLD (1) | Fixed pose, zero stale trajectory feedforward; after 1.5 s enter LAND; fresh commands may resume before LAND |
 | LAND (2) | Latched descent, nominally 0.25 m/s, slowing to 0.10 m/s below 15 cm; renewed mission commands cannot cancel it |
-| LANDED (3) | Height <= 4 cm and estimated vertical speed <= 0.15 m/s for 500 ms: disarm and block automatic rearm |
-| FAULT (4) | Missing trustworthy height, invalid state, or landing timeout: motor stop; **not** successful controlled landing |
+| LAND, blind | Camera and ToF both stale above 15 cm (e.g. camera lost above the 1.3 m ToF range): descend for at most 6 s on the IMU-propagated estimate with thrust held at 0.97-0.99 x the hover thrust learned while height was aided, so an unseen accel bias cannot make it climb; the band stays 1 s after a height source returns (reason bit 32) |
+| LANDED (3) | Height <= 4 cm and estimated vertical speed <= 0.15 m/s for 500 ms (thrust capped at 0.99 x hover during the dwell, so a biased estimate cannot hold it a few cm up): disarm and block automatic rearm |
+| FAULT (4) | No trustworthy height near the ground or after the blind budget, invalid state, or landing timeout: motor stop; **not** successful controlled landing |
 
 Camera input older than 300 ms triggers LAND even if commands still arrive. XY hold is allowed only
 with fresh tracking; after tracking loss it uses local velocity braking when qualified flow/range

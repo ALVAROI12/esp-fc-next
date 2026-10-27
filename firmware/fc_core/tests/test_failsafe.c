@@ -303,6 +303,13 @@ static void test_all_height_loss_is_fault_not_success_and_cannot_rearm(void)
 {
     hover();
     drive(320, false, false, true, 1);
+    /* Airborne: bounded blind descent on the IMU-propagated estimate instead of a motor cut in the air. */
+    TEST_ASSERT_EQUAL(FC_FAILSAFE_LAND, fc_failsafe_state());
+    TEST_ASSERT_BITS_HIGH(FC_FAILSAFE_REASON_BLIND | FC_FAILSAFE_REASON_TRACK, (unsigned)safety_log("reason"));
+    TEST_ASSERT_TRUE(motors_on());
+    TEST_ASSERT_EQUAL(modeVelocity, fc_active_setpoint()->mode.z);
+    TEST_ASSERT_EQUAL_FLOAT(-FC_FAILSAFE_DESCENT_MPS, fc_active_setpoint()->velocity.z);
+    drive(FC_FAILSAFE_BLIND_MS, false, false, true, 1);
     TEST_ASSERT_EQUAL(FC_FAILSAFE_FAULT, fc_failsafe_state());
     TEST_ASSERT_BITS_HIGH(FC_FAILSAFE_REASON_HEIGHT | FC_FAILSAFE_REASON_TRACK, (unsigned)safety_log("reason"));
     TEST_ASSERT_FALSE(fc_is_armed());
@@ -312,6 +319,50 @@ static void test_all_height_loss_is_fault_not_success_and_cannot_rearm(void)
     TEST_ASSERT_TRUE(fc_set_failsafe_enabled(false));
     TEST_ASSERT_FALSE(fc_arm(true)); /* changing config cannot bypass a terminal latch */
     TEST_ASSERT_FALSE(motors_on());
+}
+
+static void test_blind_descent_hands_back_to_tof_and_lands(void)
+{
+    hover();
+    drive(320, false, false, true, 1); /* camera lost while above ToF range */
+    TEST_ASSERT_EQUAL(FC_FAILSAFE_LAND, fc_failsafe_state());
+    drive(1000, false, false, true, 1);
+    TEST_ASSERT_EQUAL(FC_FAILSAFE_LAND, fc_failsafe_state());
+    for (int i = 0; i < 100; i++) drive(10, false, true, false, 0.8f - i * 0.0077f); /* ToF back in range */
+    drive(2000, false, true, false, 0.03f);
+    TEST_ASSERT_EQUAL(FC_FAILSAFE_LANDED, fc_failsafe_state());
+    TEST_ASSERT_BITS_LOW(FC_FAILSAFE_REASON_HEIGHT, (unsigned)safety_log("reason"));
+    TEST_ASSERT_FALSE(motors_on());
+}
+
+static unsigned mean_motor_ratio(void)
+{
+    unsigned sum = 0;
+    for (unsigned m = 0; m < 4; m++) sum += fc_host_motor_ratio(m);
+    return sum / 4;
+}
+
+/* A z accelerometer bias the estimator cannot see (no height source) must not make blind descent climb:
+ * motor output stays just below the hover thrust learned while aided, whatever the biased estimate says. */
+static void test_blind_descent_thrust_stays_below_hover_despite_accel_bias(void)
+{
+    hover();
+    const float biased[3] = {0, 0, 0.98f}; /* -0.02 g: the estimate believes it sinks faster than it does */
+    unsigned maxRatio = 0, minRatio = 65535;
+    for (uint32_t i = 0; i < FC_MS_TO_TICKS(3000); i++) {
+        if (i % FC_MS_TO_TICKS(10) == 0) fc_set_position_setpoint(0.3f, -0.2f, 1, 0);
+        step(STILL, biased);
+        if (i < FC_MS_TO_TICKS(320) || !motors_on()) continue;
+        unsigned r = mean_motor_ratio();
+        if (r > maxRatio) maxRatio = r;
+        if (r < minRatio) minRatio = r;
+    }
+    TEST_ASSERT_EQUAL(FC_FAILSAFE_LAND, fc_failsafe_state());
+    TEST_ASSERT_BITS_HIGH(FC_FAILSAFE_REASON_BLIND, (unsigned)safety_log("reason"));
+    double hoverRatio = safety_log("hoverThrust");
+    TEST_ASSERT_TRUE(hoverRatio > 20000);
+    TEST_ASSERT_LESS_OR_EQUAL_UINT(hoverRatio * (FC_FAILSAFE_SINK_THRUST_MAX + 0.002f), maxRatio);
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT(hoverRatio * (FC_FAILSAFE_SINK_THRUST_MIN - 0.002f), minRatio);
 }
 
 static void test_camera_height_fallback_and_slow_descent(void)
@@ -369,6 +420,34 @@ static void test_touchdown_requires_actual_low_height_low_speed_and_dwell(void)
     fc_init();
     ground();
     TEST_ASSERT_TRUE(fc_arm(true)); /* explicit initialization permits a new flight */
+}
+
+/* With a z accel bias the ToF-only estimate reads a faster sink than the real one; the vehicle can hover a few
+ * cm up through the whole dwell and the motor stop then drops it. During the dwell motor output stays below
+ * hover, so a vehicle still in the air keeps settling instead of being held up by the biased estimate. */
+static void test_touchdown_dwell_thrust_stays_below_hover(void)
+{
+    hover();
+    drive(2100, true, true, false, 1);
+    TEST_ASSERT_EQUAL(FC_FAILSAFE_LAND, fc_failsafe_state());
+    double hoverRatio = safety_log("hoverThrust");
+    TEST_ASSERT_TRUE(hoverRatio > 20000);
+    const float biased[3] = {0, 0, 0.98f};
+    unsigned maxRatio = 0, dwellTicks = 0;
+    for (uint32_t i = 0; i < FC_MS_TO_TICKS(3000) && fc_is_armed(); i++) {
+        if (i % FC_MS_TO_TICKS(10) == 0) {
+            TEST_ASSERT_TRUE(fc_push_position(0.3f, -0.2f, 0.03f, 0.01f));
+            TEST_ASSERT_TRUE(fc_push_tof(0.03f, 0.01f));
+        }
+        step(STILL, biased);
+        if (safety_log("height") > FC_FAILSAFE_TOUCHDOWN_HEIGHT_M ||
+            fabsf(fc_state()->velocity.z) > FC_FAILSAFE_TOUCHDOWN_SPEED_MPS || !motors_on()) continue;
+        dwellTicks++;
+        unsigned r = mean_motor_ratio();
+        if (r > maxRatio) maxRatio = r;
+    }
+    TEST_ASSERT_GREATER_THAN(FC_MS_TO_TICKS(100), dwellTicks);
+    TEST_ASSERT_LESS_OR_EQUAL_UINT(hoverRatio * (FC_FAILSAFE_SINK_THRUST_MAX + 0.002f), maxRatio);
 }
 
 static void test_landing_timeout_is_fault(void)
@@ -650,8 +729,11 @@ int main(void)
     RUN_TEST(test_combined_loss_uses_local_height_beyond_legacy_shutdown);
     RUN_TEST(test_xy_loss_during_landing_is_permanent);
     RUN_TEST(test_all_height_loss_is_fault_not_success_and_cannot_rearm);
+    RUN_TEST(test_blind_descent_hands_back_to_tof_and_lands);
+    RUN_TEST(test_blind_descent_thrust_stays_below_hover_despite_accel_bias);
     RUN_TEST(test_camera_height_fallback_and_slow_descent);
     RUN_TEST(test_touchdown_requires_actual_low_height_low_speed_and_dwell);
+    RUN_TEST(test_touchdown_dwell_thrust_stays_below_hover);
     RUN_TEST(test_landing_timeout_is_fault);
     RUN_TEST(test_touchdown_dwell_restarts_after_height_rises);
     RUN_TEST(test_tof_expiry_during_dwell_uses_camera_height_and_restarts_dwell);

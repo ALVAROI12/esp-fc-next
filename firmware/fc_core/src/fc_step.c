@@ -66,7 +66,9 @@ static struct {
     bool havePosition, haveTof, landXYDisabled, touchdownPending;
     uint32_t positionTick, tofTick, holdTick, landTick, touchdownTick, estimatorResets;
     float holdX, holdY, holdZ, holdYaw, tofHeight, height;
-    bool haveFlow, flowLanding;
+    bool haveFlow, flowLanding, blind, blindCap;
+    uint32_t blindTick, blindLastTick;
+    float hoverThrust; /* EMA of the commanded thrust while airborne with a height source */
     uint32_t flowTick;
     uint8_t flowFresh, flowBrake;
 } fc;
@@ -494,15 +496,35 @@ static void apply_failsafe(const float gyro[3], const float acc[3])
             fc.flowLanding = true;
         }
     }
-    if (!fc.tofFresh && !fc.posFresh) {
-        safety_fault(FC_FAILSAFE_REASON_HEIGHT);
-        return;
-    }
-    fc.height = fc.tofFresh ? fc.tofHeight : fc.state.position.z - fc.groundZ;
     if ((uint32_t)(fc.tick - fc.landTick) >= FC_MS_TO_TICKS(FC_FAILSAFE_LAND_TIMEOUT_MS)) {
         safety_fault(FC_FAILSAFE_REASON_TIMEOUT);
         return;
     }
+    if (!fc.tofFresh && !fc.posFresh) {
+        /* ESP-FC Next: camera lost above ToF range (or both briefly stale). Cutting motors in the air drops
+         * the vehicle (about 6 m/s from 2 m); descend on the IMU-propagated estimate for a bounded time so the
+         * ToF can come back into range. Near the ground, or once the budget is spent, stop as before. */
+        if (!fc.blind) {
+            fc.blind = true;
+            fc.blindTick = fc.tick;
+            /* LAND started this tick: no measured landing height yet; the estimate was aided until now. */
+            if (fc.landTick == fc.tick) fc.height = fc.state.position.z - fc.groundZ;
+        }
+        if (fc.height <= FC_FAILSAFE_SLOW_HEIGHT_M ||
+            (uint32_t)(fc.tick - fc.blindTick) >= FC_MS_TO_TICKS(FC_FAILSAFE_BLIND_MS)) {
+            safety_fault(FC_FAILSAFE_REASON_HEIGHT);
+            return;
+        }
+        fc.safetyReason |= FC_FAILSAFE_REASON_BLIND;
+        fc.blindCap = true;
+        fc.blindLastTick = fc.tick;
+        fc.touchdownPending = false; /* touchdown needs a measured height */
+        fc.activeSetpoint.mode.z = modeVelocity;
+        fc.activeSetpoint.velocity.z = -FC_FAILSAFE_DESCENT_MPS;
+        return;
+    }
+    fc.blind = false;
+    fc.height = fc.tofFresh ? fc.tofHeight : fc.state.position.z - fc.groundZ;
     fc.activeSetpoint.mode.z = modeVelocity;
     fc.activeSetpoint.velocity.z = fc.height < FC_FAILSAFE_SLOW_HEIGHT_M ?
         -FC_FAILSAFE_SLOW_DESCENT_MPS : -FC_FAILSAFE_DESCENT_MPS;
@@ -600,6 +622,23 @@ void fc_step(const float gyro_raw[3], const float acc_raw[3])
     }
 
     controller(&fc.control, &fc.activeSetpoint, &fc.sensors, &fc.state, fc.tick);
+    if (fc.blindCap && !fc.blind &&
+        (uint32_t)(fc.tick - fc.blindLastTick) >= FC_MS_TO_TICKS(FC_FAILSAFE_BLIND_SETTLE_MS)) {
+        fc.blindCap = false;
+        positionControllerResetAllPID(); /* the integrators wound up against the band */
+    }
+    if (fc.hoverThrust > 0 && (fc.blindCap || fc.touchdownPending)) {
+        /* ESP-FC Next: the unaided estimate cannot see a z accel bias, and right after a height source returns
+         * its velocity is still wrong; bound thrust to a sink band below hover until it has settled. In the
+         * touchdown dwell a ToF-only estimate can still hold the vehicle a few cm up; only the ceiling applies. */
+        float lo = fc.blindCap ? fc.hoverThrust * FC_FAILSAFE_SINK_THRUST_MIN : 0;
+        fc.control.thrust = fminf(fmaxf(fc.control.thrust, lo), fc.hoverThrust * FC_FAILSAFE_SINK_THRUST_MAX);
+    }
+    if (fc.airborne && fc.safetyState < FC_FAILSAFE_LAND && (position_fresh() || tof_fresh())) {
+        /* ponytail: 1 s EMA; a camera loss within ~1 s of lift-off learns a climb-biased hover thrust. */
+        if (fc.hoverThrust <= 0) fc.hoverThrust = fc.control.thrust;
+        fc.hoverThrust += (fc.control.thrust - fc.hoverThrust) / (float)FC_STEP_RATE_HZ; /* 1 s */
+    }
 
     if (fc.armed && !fc.emergencyStop) {
         powerDistribution(&fc.control);
@@ -643,6 +682,7 @@ LOG_ADD(LOG_FLOAT, holdX, &fc.holdX)
 LOG_ADD(LOG_FLOAT, holdY, &fc.holdY)
 LOG_ADD(LOG_FLOAT, holdZ, &fc.holdZ)
 LOG_ADD(LOG_FLOAT, height, &fc.height)
+LOG_ADD(LOG_FLOAT, hoverThrust, &fc.hoverThrust)
 LOG_GROUP_STOP(fcSafety)
 
 LOG_GROUP_START(fcGyro)

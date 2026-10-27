@@ -129,7 +129,7 @@ def on_page(canvas, doc):
     canvas.saveState()
     canvas.setFont("Helvetica", 7.5)
     canvas.setFillColor(colors.grey)
-    canvas.drawString(0.75 * inch, 0.5 * inch, "ESP-FC Next - Project Plan v1.6")
+    canvas.drawString(0.75 * inch, 0.5 * inch, "ESP-FC Next - Project Plan v1.7")
     canvas.drawRightString(7.75 * inch, 0.5 * inch, f"Page {doc.page}")
     canvas.setStrokeColor(GRID)
     canvas.line(0.75 * inch, 0.62 * inch, 7.75 * inch, 0.62 * inch)
@@ -146,7 +146,7 @@ def build():
     s.append(table([
         ["Item", "Value"],
         ["Document", "Project plan, gap analysis and Phase 1 task list"],
-        ["Version / date", f"v1.5 - {date.today():%B %d, %Y}"],
+        ["Version / date", f"v1.7 - {date.today():%B %d, %Y}"],
         ["Base project", "Espressif ESP-Drone (GPL-3.0), master after PR #137 (ESP-IDF 5.5 / 6.1)"],
         ["First target", "Indoor swarm of 4 drones, USA"],
         ["Guiding rule", "Nothing is ordered or assembled until math, simulation and code/PCB review gates pass"],
@@ -193,11 +193,11 @@ def build():
     s.append(p("rtlopez/esp-fc (Betaflight-configurator-compatible ESP32 firmware), ArduPilot's experimental "
                "ESP32 port, Crazyflie upstream, and the open-source Low-Cost-Mocap project (ESP32 drone swarm "
                "with PS3 Eye cameras)."))
-    s.append(KeepTogether([p("Progress so far (v1.6)", H2), table([
+    s.append(KeepTogether([p("Progress so far (v1.7)", H2), table([
         ["Task", "Status", "Key result"],
         ["1.1 Repo + toolchain", "Done", "Private GitHub repo, Docker ESP-IDF 5.5 (Colima), CI builds P4 + S3 + C5 firmware"],
         ["1.2 Portable flight core", "Done", "18 Crazyflie algorithm files build on the PC unchanged (fc_core); HAL = existing driver interfaces"],
-        ["1.3 Unit tests", "Done", "7 Unity suites, 45 tests under ASan/UBSan; found and fixed 2 real bugs: Kalman 0/0 NaN when gyro "
+        ["1.3 Unit tests", "Done", "Started with 7 suites, 45 tests; now 14 suites, 132 tests under ASan/UBSan. First pass found and fixed 2 real bugs: Kalman 0/0 NaN when gyro "
          "reads exactly zero (could reset the FC in flight) and a 64-bit invSqrt over-read"],
         ["1.4 Gate G1 math model", "Done - PASS", "Stock ESP-Drone timing (500 Hz) + stock gains: roll/pitch rate loop PM 24.6 deg, "
          "GM 4.5 dB (fails). Planned 4 kHz loop: 3.5x worst-case bandwidth (11.3 vs 3.3 Hz) at equal margins; robust gains "
@@ -219,7 +219,9 @@ def build():
          "Command loss: fixed-pose hold then descent; camera loss: level descent with independent local ToF. "
          "LAND stays latched through touchdown, even if commands return; terminal states block automatic rearm. "
          "Nominal 1/4 kHz SITL: max descent 0.263 m/s, sampled touchdown approach 0.093-0.102 m/s; motors off at ground. "
-         "All-height loss is a separate FAULT/motor stop, not safe landing."],
+         "Camera lost above the 1.3 m ToF range: bounded 6 s blind descent with thrust held at 0.97-0.99 x learned "
+         "hover, so a +/-0.02 g unseen accel bias still lands (it climbed to 4 m and fell before). "
+         "Permanent loss of every height source is still a FAULT/motor stop, not safe landing."],
         ["Local flow braking", "SITL checks pass; hardware pending",
          "Healthy flow/range enables zero-velocity braking after camera loss instead of passive coasting. "
          "Nominal excursion 1.71-1.72 m -> 0.277-0.290 m; sampled stress worst 0.349 m at 1/4 kHz. "
@@ -231,11 +233,16 @@ def build():
          "position/ToF/flow are dropped in legacy mode too. Regression tests failed before the fix."],
         ["1.7 Link protocols", "In progress",
          "docs/protocols.md: 64-byte P4-C5 SPI frame with CRC-16, 20-byte 50 Hz swarm status, 32-message "
-         "anti-replay window; unit tests + libFuzzer (make link-fuzz); builds on the C5 toolchain. AES-CCM "
-         "envelope specified, not yet built/tested; no SPI/ESP-NOW transport yet."],
-        ["1.9 G3 quality gate", "Started",
-         "cppcheck clean (make core-lint, CI); fc_core sources 91-100% line coverage, but the compiled "
-         "Crazyflie set is 55% overall (unused INDI/Mellinger/planner at 0-5%); clang-tidy not set up."],
+         "anti-replay window; unit tests + libFuzzer (make link-fuzz, 1 h run: 4.3 B inputs, no crash); builds on "
+         "the C5 toolchain. AES-128-CCM envelope built on IDF mbedtls 3.6.7 with RFC 3610 vector tests; C5 boot "
+         "self-check not yet run on a board; no SPI/ESP-NOW transport yet."],
+        ["1.8 Swarm simulation", "SITL checks pass",
+         "make swarm: four firmware copies in lockstep, altitude layers 1.0-2.05 m, square formation and diagonal "
+         "swap. Nominal, link loss and camera dropout (in formation and mid-swap, top layer) all land safely; "
+         "minimum separation 0.35 m. No inter-drone downwash or battery model."],
+        ["1.9 G3 quality gate", "Met on host",
+         "cppcheck and clang-tidy clean (make core-lint / core-tidy, CI); -Wall -Wextra on fc_core sources; "
+         "line coverage 80.8% of fc_step-reachable code (INDI/Mellinger excluded, planner not built on host)."],
     ], [1.35, 0.8, 4.85]), p(
         "4 kHz is a host/SITL configuration, not a measured ESP32-P4 runtime. The production P4 image still uses "
         "the existing ESP-Drone task loop. Driver integration, CPU deadlines, Wi-Fi/camera contention and hardware "
@@ -252,7 +259,7 @@ def build():
         "dwell are engineering assumptions. Without local flow, moving camera-loss tests drift about 1.7-2.0 m. "
         "Flow/range braking reduces the tested excursion but does not provide collision-safe swarm flight; "
         "all-height loss can still cause a fall. Finite frozen/replayed sensor data is not detected. "
-        "The four-drone fault/landing acceptance gate remains open; nominal single-drone tests do not pass it. "
+        "The four-drone fault/landing gate passes in SITL only (no downwash, battery or radio timing). "
         "BMP581 pressure noise is not equivalent to altitude accuracy: barometer/contact redundancy is still "
         "research, not an implemented safe-touchdown fallback.", NOTE)]))
     s.append(PageBreak())

@@ -71,6 +71,7 @@ typedef enum {
 #define FC_FAILSAFE_REASON_HEIGHT 4u
 #define FC_FAILSAFE_REASON_TIMEOUT 8u
 #define FC_FAILSAFE_REASON_INVALID_STATE 16u
+#define FC_FAILSAFE_REASON_BLIND 32u /* LAND continued without any height source (bounded) */
 #define FC_FAILSAFE_POSITION_TIMEOUT_MS 300
 #define FC_FAILSAFE_TOF_TIMEOUT_MS 200
 #define FC_FAILSAFE_HOLD_MS 1500
@@ -82,6 +83,17 @@ typedef enum {
 #define FC_FAILSAFE_TOUCHDOWN_HEIGHT_M 0.04f
 #define FC_FAILSAFE_TOUCHDOWN_SPEED_MPS 0.15f
 #define FC_FAILSAFE_MAX_TOF_M 4.0f
+/* Camera and ToF both stale while airborne above FC_FAILSAFE_SLOW_HEIGHT_M (e.g. camera lost above the
+ * VL53L1X short-mode 1.3 m range): keep descending on the IMU-propagated estimate for at most this long,
+ * so the ToF can come back into range, before the FAULT motor stop. Covers ~1.5 m of blind descent. */
+#define FC_FAILSAFE_BLIND_MS 6000
+/* Blind-descent (and, ceiling only, touchdown-dwell) thrust band as a fraction of the hover thrust learned while height was aided. The unaided
+ * estimate drifts with any z accel bias (-0.02 g climbed to 4 m in SITL); the band guarantees a sink of
+ * roughly 0.2-0.6 m/s^2 (force ~ ratio^2) whatever the estimate believes, until the ToF is back in range. */
+#define FC_FAILSAFE_SINK_THRUST_MIN 0.97f
+#define FC_FAILSAFE_SINK_THRUST_MAX 0.99f
+/* The band stays on this long after a height source returns, while the drifted estimate converges. */
+#define FC_FAILSAFE_BLIND_SETTLE_MS 1000
 #define FC_FAILSAFE_FLOW_TIMEOUT_MS 100
 #define FC_FAILSAFE_FLOW_MIN_HEIGHT_M 0.12f
 
