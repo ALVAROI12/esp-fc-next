@@ -107,6 +107,11 @@ class Quadrotor:
         force = rot @ np.array([0.0, 0.0, thrust]) - np.array([0.0, 0.0, self.v.weight]) - self.v.drag_linear * vel
         acc = force / self.v.mass + disturbance[:3]
         omega_dot = self.inertia_inv @ (torque - np.cross(omega, self.inertia @ omega)) + disturbance[3:]
+        if self.ground and x[2] <= 0.0 and acc[2] <= 0.0:
+            # Resting on the floor: the normal force and friction cancel motion until thrust lifts off.
+            acc = np.zeros(3)
+            omega_dot = np.zeros(3)
+            omega = np.zeros(3)
         quat_dot = 0.5 * quat_mul(quat, np.array([0.0, *omega]))
         rotor_dot = (np.clip(command, 0.0, 1.0) - rotor) / self.v.motor_tau
         return np.concatenate([vel, acc, quat_dot, omega_dot, rotor_dot])

@@ -1,18 +1,21 @@
-# fc_core host build: the portable Crazyflie flight algorithms compiled for the
-# development machine (unit tests, SITL). On the ESP32 target the same sources
-# are built by the crazyflie ESP-IDF component in firmware/flight.
+# fc_core host build: the portable Crazyflie flight algorithms plus the synchronous fc_step loop,
+# compiled for the development machine. Produces:
+#   fc_core  - static library for unit tests (optionally with ASan/UBSan or coverage)
+#   fc_sitl  - shared library loaded by the Python SITL (sim/sitl), never sanitized
+# On the ESP32 target the algorithm sources are built by the crazyflie ESP-IDF component in firmware/flight.
 cmake_minimum_required(VERSION 3.20)
 project(fc_core C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_EXTENSIONS ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 set(COMPONENTS ${CMAKE_CURRENT_LIST_DIR}/../flight/components)
 set(CF ${COMPONENTS}/core/crazyflie)
 
 # Portable algorithm sources, used in place from the ESP-Drone subtree.
-set(FC_CORE_SOURCES
+set(CF_SOURCES
     ${CF}/modules/src/pid.c
     ${CF}/modules/src/attitude_pid_controller.c
     ${CF}/modules/src/controller.c
@@ -40,26 +43,38 @@ file(GLOB DSP_SOURCES
     ${COMPONENTS}/lib/dsp_lib/CommonTables/*.c
 )
 
-add_library(fc_core STATIC ${FC_CORE_SOURCES} ${DSP_SOURCES} host/src/fc_host.c)
+# ESP-FC Next portable loop (fc_step + synchronous Kalman) and host HAL.
+set(FC_SOURCES src/fc_step.c src/fc_kalman.c)
+set(HOST_SOURCES host/src/fc_host.c host/src/fc_vars.c)
 
-# Host shims come first so they shadow the ESP-IDF/FreeRTOS headers.
-target_include_directories(fc_core PUBLIC
-    host/include
-    ${CF}/modules/interface
-    ${CF}/utils/interface
-    ${CF}/hal/interface
-    ${COMPONENTS}/config/include
-    ${COMPONENTS}/platform
-    ${COMPONENTS}/drivers/general/motors/include
-    ${COMPONENTS}/lib/dsp_lib/include
-)
+function(fc_configure target)
+    # Host shims come first so they shadow the ESP-IDF/FreeRTOS headers and param.h/log.h.
+    target_include_directories(${target} PUBLIC
+        include
+        src
+        host/include
+        ${CF}/modules/interface
+        ${CF}/utils/interface
+        ${CF}/hal/interface
+        ${COMPONENTS}/config/include
+        ${COMPONENTS}/platform
+        ${COMPONENTS}/drivers/general/motors/include
+        ${COMPONENTS}/lib/dsp_lib/include
+    )
+    # UNIT_TEST_MODE: Crazyflie macros skip the ELF linker sections; host/include re-adds the tables.
+    target_compile_definitions(${target} PUBLIC UNIT_TEST_MODE FC_HOST_BUILD)
+    target_compile_options(${target} PRIVATE -fno-strict-aliasing -Wno-format)
+    target_link_libraries(${target} PUBLIC m)
+endfunction()
 
-# UNIT_TEST_MODE turns the Crazyflie LOG/PARAM registration macros into no-ops.
-target_compile_definitions(fc_core PUBLIC UNIT_TEST_MODE FC_HOST_BUILD)
-target_compile_options(fc_core PRIVATE -fno-strict-aliasing -Wno-format)
-target_link_libraries(fc_core PUBLIC m)
+add_library(fc_core STATIC ${CF_SOURCES} ${DSP_SOURCES} ${FC_SOURCES} ${HOST_SOURCES})
+fc_configure(fc_core)
 
-option(FC_SANITIZE "Build with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+add_library(fc_sitl SHARED ${CF_SOURCES} ${DSP_SOURCES} ${FC_SOURCES} ${HOST_SOURCES})
+fc_configure(fc_sitl)
+target_compile_options(fc_sitl PRIVATE -O2)
+
+option(FC_SANITIZE "Build fc_core and tests with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 if(FC_SANITIZE)
     target_compile_options(fc_core PUBLIC -fsanitize=address,undefined -fno-omit-frame-pointer)
     target_link_options(fc_core PUBLIC -fsanitize=address,undefined)

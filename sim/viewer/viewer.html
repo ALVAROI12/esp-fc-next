@@ -54,7 +54,7 @@
 <div id="app">
   <header>
     <h1>ESP-FC Next - simulation replay</h1>
-    <span class="sub">Nonlinear 6-DOF model + Python port of the firmware cascaded PID (gate G1)</span>
+    <span class="sub">6-DOF physics: G1 controller study (Python port) and G2 SITL (the real C flight firmware)</span>
   </header>
   <div id="view">
     <div id="clock">0.000 s</div>
@@ -64,12 +64,7 @@
     <h2 id="title"></h2>
     <p id="desc"></p>
     <div id="drones"></div>
-    <div class="ctitle">Roll angle (deg) - dashed: setpoint</div>
-    <canvas class="chart" id="c-roll"></canvas>
-    <div class="ctitle">Roll rate (deg/s)</div>
-    <canvas class="chart" id="c-rate"></canvas>
-    <div class="ctitle">Motor M1 command (% of full scale)</div>
-    <canvas class="chart" id="c-motor"></canvas>
+    <div id="charts"></div>
   </aside>
   <footer>
     <select id="scenario"></select>
@@ -183,7 +178,7 @@ function loadScenario(id) {
   clearScene();
   scen = DATA.scenarios.find((s) => s.id === id);
   const n = scen.drones.length;
-  const spacing = n > 3 ? 0.62 : 0.85;
+  const spacing = scen.spacing ?? (n > 3 ? 0.62 : 0.85);
   scen.drones.forEach((d, i) => {
     const offset = (i - (n - 1) / 2) * spacing;
     const { group, props } = makeDrone(d.color);
@@ -208,73 +203,70 @@ function loadScenario(id) {
   $("title").textContent = scen.title;
   $("desc").textContent = scen.description;
   $("drones").innerHTML = scen.drones.map((d) => {
-    const status = d.lost !== null ? `<span class="badge bad">lost control ${d.lost.toFixed(2)} s</span>`
-      : (!d.stable || d.shake > 20) ? `<span class="badge bad">oscillating</span>` : `<span class="badge ok">stable</span>`;
-    const margins = d.stable ? `PM ${d.pm} deg, GM ${d.gm} dB` : "linear model: UNSTABLE";
-    return `<div class="drone"><div class="sw" style="background:${d.color}"></div><div class="name">${d.label}</div>${status}
-      <div class="note">${d.note}</div><div class="stats">rate loop ${margins} | roll-rate std after gust ${d.shake} deg/s</div></div>`;
+    const badge = d.lost !== null ? `lost control ${d.lost.toFixed(2)} s` : d.badge;
+    const cls = d.lost !== null || d.status !== "ok" ? "bad" : "ok";
+    return `<div class="drone"><div class="sw" style="background:${d.color}"></div><div class="name">${d.label}</div>
+      <span class="badge ${cls}">${badge}</span><div class="note">${d.note}</div><div class="stats">${d.stats}</div></div>`;
   }).join("");
+  $("charts").innerHTML = scen.charts.map((c, i) =>
+    `<div class="ctitle">${c.title}</div><canvas class="chart" id="chart-${i}"></canvas>`).join("");
   simTime = 0;
-  camera.position.set(0.3, 1.45, n > 3 ? 3.6 : 2.3);
-  controls.target.set(0, 1, 0.15);
+  const cam = scen.camera ?? [0.3, 1.45, n > 3 ? 3.6 : 2.3];
+  camera.position.set(cam[0], cam[1], cam[2]);
+  controls.target.set(0, scen.target_y ?? 1, 0.15);
   drawCharts();
   resize();
 }
 
 // ---------- charts ----------
-const charts = [
-  { id: "c-roll", key: "roll", sp: "rollsp", scale: 1 },
-  { id: "c-rate", key: "rate", scale: 1 },
-  { id: "c-motor", key: "motors", index: 0, scale: 100 },
-];
 const chartCache = new Map();
 
-function series(d, c) {
-  return c.index !== undefined ? d[c.key].map((m) => m[c.index] * c.scale) : d[c.key].map((v) => v * c.scale);
-}
-
 function drawCharts() {
-  charts.forEach((c) => {
-    const cv = $(c.id), dpr = window.devicePixelRatio || 1;
+  chartCache.clear();
+  scen.charts.forEach((c, i) => {
+    const cv = $(`chart-${i}`), dpr = window.devicePixelRatio || 1;
     const w = cv.clientWidth, h = cv.clientHeight;
     cv.width = w * dpr; cv.height = h * dpr;
     const ctx = cv.getContext("2d");
     ctx.scale(dpr, dpr);
-    const all = scen.drones.flatMap((d) => series(d, c)).filter(Number.isFinite);
+    const spData = c.sp ? scen.drones[0].series[c.sp] : [];
+    const all = scen.drones.flatMap((d) => d.series[c.series]).concat(spData).filter(Number.isFinite);
     let lo = Math.min(...all), hi = Math.max(...all);
-    if (c.sp) { lo = Math.min(lo, ...scen.drones[0][c.sp]); hi = Math.max(hi, ...scen.drones[0][c.sp]); }
     const pad = (hi - lo) * 0.08 || 1; lo -= pad; hi += pad;
-    const L = 40, R = 6, T = 6, B = 16;
-    const x = (t) => L + (t / DATA.duration) * (w - L - R);
+    const L = 40, R = 6, T = 6, B = 16, dur = scen.duration;
+    const x = (t) => L + (t / dur) * (w - L - R);
     const y = (v) => T + (1 - (v - lo) / (hi - lo)) * (h - T - B);
     ctx.fillStyle = "#11171d"; ctx.fillRect(0, 0, w, h);
     ctx.strokeStyle = "#263241"; ctx.fillStyle = "#8796a8"; ctx.font = "10px ui-monospace, Menlo, monospace"; ctx.lineWidth = 1;
     for (let k = 0; k <= 4; k++) {
       const v = lo + (k / 4) * (hi - lo), yy = y(v);
       ctx.beginPath(); ctx.moveTo(L, yy); ctx.lineTo(w - R, yy); ctx.stroke();
-      ctx.fillText(v.toFixed(Math.abs(hi - lo) < 10 ? 1 : 0), 2, yy + 3);
+      ctx.fillText(v.toFixed(Math.abs(hi - lo) < 10 ? 2 : 0), 2, yy + 3);
     }
-    for (let t = 0; t <= DATA.duration + 1e-9; t += 0.5) ctx.fillText(t.toFixed(1), x(t) - 8, h - 3);
-    if (c.sp) {
-      const d = scen.drones[0];
-      ctx.setLineDash([5, 4]); ctx.strokeStyle = "#e6edf3"; ctx.beginPath();
-      d.t.forEach((t, k) => (k ? ctx.lineTo(x(t), y(d[c.sp][k])) : ctx.moveTo(x(t), y(d[c.sp][k]))));
-      ctx.stroke(); ctx.setLineDash([]);
-    }
-    scen.drones.forEach((d) => {
-      const s = series(d, c);
-      ctx.strokeStyle = d.color; ctx.lineWidth = 1.4; ctx.beginPath();
-      d.t.forEach((t, k) => (k ? ctx.lineTo(x(t), y(s[k])) : ctx.moveTo(x(t), y(s[k]))));
+    const tickStep = dur > 8 ? 2 : 0.5;
+    for (let t = 0; t <= dur + 1e-9; t += tickStep) ctx.fillText(t.toFixed(tickStep < 1 ? 1 : 0), x(t) - 8, h - 3);
+    const line = (ts, vs) => {
+      ctx.beginPath();
+      let pen = false;
+      ts.forEach((t, k) => {
+        if (!Number.isFinite(vs[k])) { pen = false; return; }
+        pen ? ctx.lineTo(x(t), y(vs[k])) : ctx.moveTo(x(t), y(vs[k]));
+        pen = true;
+      });
       ctx.stroke();
-    });
-    chartCache.set(c.id, { image: ctx.getImageData(0, 0, cv.width, cv.height), x, ctx, h });
+    };
+    if (c.sp) {
+      ctx.setLineDash([5, 4]); ctx.strokeStyle = "#e6edf3"; ctx.lineWidth = 1;
+      line(scen.drones[0].t, spData);
+      ctx.setLineDash([]);
+    }
+    scen.drones.forEach((d) => { ctx.strokeStyle = d.color; ctx.lineWidth = 1.4; line(d.t, d.series[c.series]); });
+    chartCache.set(i, { image: ctx.getImageData(0, 0, cv.width, cv.height), x, ctx, h });
   });
 }
 
 function drawCursor() {
-  charts.forEach((c) => {
-    const cc = chartCache.get(c.id);
-    if (!cc) return;
+  chartCache.forEach((cc) => {
     cc.ctx.putImageData(cc.image, 0, 0);
     const xx = cc.x(simTime);
     cc.ctx.strokeStyle = "rgba(255,255,255,.75)"; cc.ctx.lineWidth = 1;
@@ -301,8 +293,8 @@ function applyFrame() {
   });
   const tt = simTime.toFixed(3) + " s";
   $("clock").textContent = tt;
-  $("time").textContent = tt + " / " + DATA.duration.toFixed(1);
-  $("scrub").value = String(Math.round((simTime / DATA.duration) * 1000));
+  $("time").textContent = tt + " / " + scen.duration.toFixed(1);
+  $("scrub").value = String(Math.round((simTime / scen.duration) * 1000));
   drawCursor();
 }
 
@@ -310,11 +302,11 @@ function tick(now) {
   const dt = Math.min(0.1, (now - lastFrame) / 1000);
   lastFrame = now;
   if (playing) {
-    if (simTime >= DATA.duration) {
+    if (simTime >= scen.duration) {
       endPause += dt;
       if (endPause > 1.2) { simTime = 0; endPause = 0; }
     } else {
-      simTime = Math.min(DATA.duration, simTime + dt * Number($("speed").value));
+      simTime = Math.min(scen.duration, simTime + dt * Number($("speed").value));
     }
   }
   applyFrame();
@@ -337,10 +329,10 @@ function resize() {
 DATA.scenarios.forEach((s) => $("scenario").add(new Option(s.title, s.id)));
 $("scenario").onchange = (e) => loadScenario(e.target.value);
 $("play").onclick = () => { playing = !playing; $("play").textContent = playing ? "Pause" : "Play"; };
-$("scrub").oninput = (e) => { simTime = (Number(e.target.value) / 1000) * DATA.duration; endPause = 0; };
+$("scrub").oninput = (e) => { simTime = (Number(e.target.value) / 1000) * scen.duration; endPause = 0; };
 window.addEventListener("keydown", (e) => {
   if (e.code === "Space") { e.preventDefault(); $("play").click(); }
-  if (e.code === "ArrowRight") simTime = Math.min(DATA.duration, simTime + 1 / playbackHz());
+  if (e.code === "ArrowRight") simTime = Math.min(scen.duration, simTime + 1 / playbackHz());
   if (e.code === "ArrowLeft") simTime = Math.max(0, simTime - 1 / playbackHz());
 });
 window.addEventListener("resize", resize);

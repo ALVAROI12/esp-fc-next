@@ -60,11 +60,29 @@ Coverage of the flight path in use today (Task 1.3): `num.c` 100%, `pid.c` 91%, 
 Not yet tested: INDI, Mellinger, trajectory planner, outlier filter, and the Kalman flow/ToF/baro updates
 (Task 1.6 adds the latter, which the indoor swarm needs).
 
+## fc_step: the synchronous flight loop (Task 1.5)
+
+`include/fc_step.h` / `src/fc_step.c` replace the Tier B `stabilizerTask` + `kalmanTask` + sensor-task glue
+with one call per 1 kHz tick, portable to the P4 (no RTOS calls, no allocation):
+
+1. Gyro-bias (1024 samples, restarts if moving) and accel-scale (200 samples) calibration, then the same
+   2-pole LPFs as the sensor driver (gyro 80 Hz, accel 30 Hz).
+2. `src/fc_kalman.c`: synchronous port of `estimator_kalman.c` (100 Hz prediction, process noise and
+   measurement updates every tick, supervisor reset) with fixed-size queues for position / ToF / flow.
+3. Commander watchdog copied from `commander.c` (level after 500 ms, cut motors after 2 s).
+4. `controller()` (PID) and `powerDistribution()`; motors only when calibrated, armed and not e-stopped.
+
+## Firmware variables on the host
+
+`host/include/param.h` and `log.h` override the Crazyflie headers: instead of discarding the PARAM/LOG
+tables (ELF-only linker sections), they keep them as static arrays registered by a constructor.
+`fc_vars.h` reads/writes them by cfclient name (`posCtlPid.thrustBase`, `posCtl.Zi`, ...): 84 parameters
+and 103 log variables, with no changes to the subtree.
+
 ## Next steps
 
-- **Task 1.5/1.6:** add a synchronous `fc_step()` loop (sensors -> estimator -> controller -> mixer)
-  that replaces the Tier B `stabilizerTask` + `kalmanTask` pair, used by both SITL and the P4 target, so
-  simulation and hardware run the same code path.
+- **Task 1.6:** run `fc_step` on the P4 at the planned 4 kHz, board profile with the G1 gains and SITL
+  findings (zKi, thrustBase), velocity feedforward, exact `1/sqrtf`, flow/ToF fusion tests.
 
 ## Patches applied to the ESP-Drone subtree
 

@@ -20,4 +20,5 @@ Dual-chip ESP32-P4 (flight) + ESP32-C5 (radio) flight controller. Plan: `docs/ES
 - `make core-coverage` - coverage summary + HTML in `build/coverage/`
 - `make sim-setup` / `make sim-test` - Python sim environment (uv, Python 3.12) and tests
 - `make g1` - gate G1 report; re-run after changing gains, loop timing, or `sim/model/params.py`
-- `make viewer` - 3D replay viewer of the G1 scenarios (generated, git-ignored)
+- `make viewer` - 3D replay viewer of the G1 and SITL scenarios (generated, git-ignored)
+- SITL (`sim/sitl`) rebuilds `build/fc_sitl` automatically from `firmware/fc_core` when sources change

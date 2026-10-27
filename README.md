@@ -12,7 +12,7 @@ The full plan, gap analysis and gates are in [`docs/ESP-FC-Next_Project_Plan.pdf
 | `firmware/flight/` | ESP32-P4 flight firmware (ESP-Drone fork, imported with `git subtree`) |
 | `firmware/fc_core/` | Host (PC) build of the portable flight algorithms + HAL shims and tests ([docs](docs/fc_core.md)) |
 | `firmware/radio/` | ESP32-C5 radio co-processor firmware (SPI link, ESP-NOW swarm, Wi-Fi) |
-| `sim/` | Math models, software-in-the-loop bridge and swarm simulation (Python) |
+| `sim/` | G1 math model, G2 software-in-the-loop (real firmware flying the 6-DOF model), 3D viewer ([docs](sim/README.md)) |
 | `hardware/` | KiCad flight-controller design (Phase 3) |
 | `tools/` | Developer scripts, swarm dongle, ground tools |
 | `docs/` | Project plan and protocol specs |

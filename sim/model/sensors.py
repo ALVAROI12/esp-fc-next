@@ -69,12 +69,15 @@ class TofModel:
 
 
 class MocapModel:
-    """World position (m) with white noise and a fixed latency, delivered at `rate_hz`."""
+    """World position (m) with white noise and a fixed latency.
 
-    def __init__(self, spec: Mocap, rng: np.random.Generator, sim_dt: float):
+    `call_period` is the time between sample() calls; latency is quantized to whole calls.
+    """
+
+    def __init__(self, spec: Mocap, rng: np.random.Generator, call_period: float):
         self.spec = spec
         self.rng = rng
-        self.delay_steps = max(0, round(spec.latency / sim_dt))
+        self.delay_steps = max(0, round(spec.latency / call_period))
         self.history: list[np.ndarray] = []
 
     def sample(self, pos: np.ndarray) -> np.ndarray:
