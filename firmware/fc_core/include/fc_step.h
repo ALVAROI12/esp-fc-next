@@ -41,6 +41,11 @@ extern "C" {
 /* Supervisor limits */
 #define FC_ARM_MAX_TILT_DEG 20.0f    /* refuse to arm unless roughly level */
 #define FC_TUMBLE_TILT_DEG 70.0f     /* tilt beyond this ... */
+/* IMU sample plausibility (calibration knobs: 1.25x a 2000 dps / 24 g sensor range). A bad sample is replaced
+ * by the last good one; this many consecutive bad ms disarm (legacy) or FAULT (safe mode). */
+#define FC_IMU_MAX_GYRO_DPS 2500.0f
+#define FC_IMU_MAX_ACC_G 30.0f
+#define FC_IMU_BAD_MAX_MS 5
 #define FC_TUMBLE_TIME_MS 300        /* ... for this long while armed -> stop motors */
 #define FC_LIFTOFF_HEIGHT_M 0.03f    /* position/velocity integrators held at zero until this high */
 

@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import atexit
 
 REPO = Path(__file__).resolve().parents[2]
 SOURCE_DIRS = [REPO / "firmware/fc_core", REPO / "firmware/flight/components/core/crazyflie"]
@@ -31,6 +32,7 @@ FAILSAFE_NORMAL, FAILSAFE_HOLD, FAILSAFE_LAND, FAILSAFE_LANDED, FAILSAFE_FAULT =
 
 _build_lock = threading.Lock()
 _instance_dir = Path(tempfile.mkdtemp(prefix="fc_sitl_"))
+atexit.register(shutil.rmtree, _instance_dir, ignore_errors=True)
 _instance_count = 0
 
 
@@ -72,8 +74,11 @@ class FlightFirmware:
         copy = _instance_dir / f"{src.stem}_{os.getpid()}_{_instance_count}{src.suffix}"
         shutil.copy2(src, copy)
         self._lib = C.CDLL(str(copy))
+        copy.unlink()  # the loaded image stays mapped; do not leave one file per drone in $TMPDIR
         self._declare()
         self._lib.fc_host_set_log_level(log_level)
+        # Count firmware ASSERTs (checked by assert_count()) instead of killing the Python process.
+        self._lib.fc_host_set_assert_aborts(False)
         self._gyro = (C.c_float * 3)()
         self._acc = (C.c_float * 3)()
         self._state = (C.c_float * 13)()
@@ -109,6 +114,7 @@ class FlightFirmware:
             "fc_host_set_time_us": (None, [C.c_uint64]),
             "fc_host_set_log_level": (None, [C.c_int]),
             "fc_host_assert_count": (u32, []),
+            "fc_host_set_assert_aborts": (None, [b]),
             "fc_param_get": (C.c_int, [C.c_char_p, C.c_char_p, C.POINTER(C.c_double)]),
             "fc_param_set": (C.c_int, [C.c_char_p, C.c_char_p, C.c_double]),
             "fc_log_get": (C.c_int, [C.c_char_p, C.c_char_p, C.POINTER(C.c_double)]),

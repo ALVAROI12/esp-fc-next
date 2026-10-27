@@ -93,6 +93,12 @@ initially assumes level. It latches tumble (>70 degrees for 300 ms), holds posit
 zero before lift-off, and does not feed unactuated commanded thrust to the EKF while disarmed.
 This is a basic simulation supervisor, not a redundant or hardware-qualified safety system.
 
+Input plausibility (both modes): an IMU sample that is non-finite or beyond `FC_IMU_MAX_GYRO_DPS` /
+`FC_IMU_MAX_ACC_G` never reaches calibration, LPF or EKF; the last good sample is held. More than
+`FC_IMU_BAD_MAX_MS` (5 ms) of consecutive bad samples disarms (legacy) or FAULTs (safe mode). Before this,
+one NaN gyro sample made the estimate NaN permanently and tripped `cf_sqrt` ASSERTs (motor stop on target).
+Position/ToF/flow pushes with a non-finite value or non-positive std are dropped in legacy mode too.
+
 ## Firmware variables on the host
 
 `host/include/param.h` and `log.h` override the Crazyflie headers: instead of discarding the PARAM/LOG

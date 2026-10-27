@@ -32,6 +32,8 @@ static struct {
     bool emergencyStop;
     bool tumbled;
     uint32_t tumbleTicks;
+    float goodGyro[3], goodAcc[3]; /* last plausible IMU sample, held across short glitches */
+    uint32_t imuBadTicks;
     bool airborne;      /* latched once the estimate rises FC_LIFTOFF_HEIGHT_M above the arming height */
     float groundZ;
     uint8_t phase; /* fc_phase_t, stored as one byte for the LOG table */
@@ -270,8 +272,15 @@ void fc_set_trajectory_setpoint(float x, float y, float z, float vx, float vy, f
     fc_set_setpoint(&sp);
 }
 
+/* ESP-FC Next: even legacy mode never enqueues a value that would make the EKF state NaN. */
+static bool finite_measurement(float a, float b, float c, float std_dev)
+{
+    return isfinite(a) && isfinite(b) && isfinite(c) && isfinite(std_dev) && std_dev > 0;
+}
+
 bool fc_push_position(float x, float y, float z, float std_dev)
 {
+    if (!finite_measurement(x, y, z, std_dev)) return false;
     /* Once braking in the local frame, never fuse a jumped camera frame during this landing. */
     if (failsafeEnabled && fc.flowLanding && fc.safetyState == FC_FAILSAFE_LAND) return false;
     bool qualified = isfinite(x) && isfinite(y) && isfinite(z) &&
@@ -289,6 +298,7 @@ bool fc_push_position(float x, float y, float z, float std_dev)
 
 bool fc_push_tof(float distance_m, float std_dev)
 {
+    if (!finite_measurement(distance_m, 0, 0, std_dev)) return false;
     float r22 = vertical_cosine();
     bool qualified = isfinite(distance_m) && distance_m >= 0 && distance_m <= FC_FAILSAFE_MAX_TOF_M &&
         isfinite(std_dev) && std_dev > 0 && std_dev <= 10.0f && isfinite(r22) && r22 >= 0.5f;
@@ -306,6 +316,7 @@ bool fc_push_tof(float distance_m, float std_dev)
 
 bool fc_push_flow(float dpixel_x, float dpixel_y, float dt, float std_dev)
 {
+    if (!finite_measurement(dpixel_x, dpixel_y, dt, std_dev) || dt <= 0) return false;
     bool qualified = isfinite(dpixel_x) && isfinite(dpixel_y) && fabsf(dpixel_x) <= 100 && fabsf(dpixel_y) <= 100 &&
         isfinite(dt) && dt >= 0.001f && dt <= 0.05f && isfinite(std_dev) && std_dev > 0 && std_dev <= 5 &&
         tof_fresh() && fc.tofHeight >= FC_FAILSAFE_FLOW_MIN_HEIGHT_M;
@@ -502,11 +513,35 @@ static void apply_failsafe(const float gyro[3], const float acc[3])
     }
 }
 
-void fc_step(const float gyro_dps[3], const float acc_g[3])
+/* ESP-FC Next: a non-finite or out-of-range IMU sample never reaches calibration, LPF or EKF. */
+static bool imu_sample(const float gyro_dps[3], const float acc_g[3])
+{
+    bool ok = true;
+    for (int i = 0; i < 3; i++) {
+        ok &= isfinite(gyro_dps[i]) && fabsf(gyro_dps[i]) <= FC_IMU_MAX_GYRO_DPS &&
+              isfinite(acc_g[i]) && fabsf(acc_g[i]) <= FC_IMU_MAX_ACC_G;
+    }
+    if (ok) {
+        memcpy(fc.goodGyro, gyro_dps, sizeof(fc.goodGyro));
+        memcpy(fc.goodAcc, acc_g, sizeof(fc.goodAcc));
+        fc.imuBadTicks = 0;
+    } else if (fc.imuBadTicks < UINT32_MAX) {
+        fc.imuBadTicks++;
+    }
+    return fc.imuBadTicks <= FC_MS_TO_TICKS(FC_IMU_BAD_MAX_MS);
+}
+
+void fc_step(const float gyro_raw[3], const float acc_raw[3])
 {
     fc.tick++;
+    bool imuOk = imu_sample(gyro_raw, acc_raw);
+    const float *gyro_dps = fc.goodGyro, *acc_g = fc.goodAcc;
+    if (!imuOk && fc.armed) {
+        if (failsafeEnabled) safety_fault(FC_FAILSAFE_REASON_INVALID_STATE);
+        fc.armed = false;
+    }
 
-    if (fc.phase == FC_PHASE_CALIBRATING) {
+    if (fc.phase == FC_PHASE_CALIBRATING && fc.imuBadTicks == 0) {
         calibrate(gyro_dps, acc_g);
     }
     filter_gyro(gyro_dps);

@@ -129,7 +129,7 @@ def on_page(canvas, doc):
     canvas.saveState()
     canvas.setFont("Helvetica", 7.5)
     canvas.setFillColor(colors.grey)
-    canvas.drawString(0.75 * inch, 0.5 * inch, "ESP-FC Next - Project Plan v1.5")
+    canvas.drawString(0.75 * inch, 0.5 * inch, "ESP-FC Next - Project Plan v1.6")
     canvas.drawRightString(7.75 * inch, 0.5 * inch, f"Page {doc.page}")
     canvas.setStrokeColor(GRID)
     canvas.line(0.75 * inch, 0.62 * inch, 7.75 * inch, 0.62 * inch)
@@ -193,7 +193,7 @@ def build():
     s.append(p("rtlopez/esp-fc (Betaflight-configurator-compatible ESP32 firmware), ArduPilot's experimental "
                "ESP32 port, Crazyflie upstream, and the open-source Low-Cost-Mocap project (ESP32 drone swarm "
                "with PS3 Eye cameras)."))
-    s.append(KeepTogether([p("Progress so far (v1.5)", H2), table([
+    s.append(KeepTogether([p("Progress so far (v1.6)", H2), table([
         ["Task", "Status", "Key result"],
         ["1.1 Repo + toolchain", "Done", "Private GitHub repo, Docker ESP-IDF 5.5 (Colima), CI builds P4 + S3 + C5 firmware"],
         ["1.2 Portable flight core", "Done", "18 Crazyflie algorithm files build on the PC unchanged (fc_core); HAL = existing driver interfaces"],
@@ -225,6 +225,17 @@ def build():
          "Nominal excursion 1.71-1.72 m -> 0.277-0.290 m; sampled stress worst 0.349 m at 1/4 kHz. "
          "Stale flow degrades to level descent; restored jumped camera frames are not reacquired. "
          "No absolute-positioning or total-height-loss solution claimed."],
+        ["Input plausibility", "Done (host/SITL)",
+         "Audit found one NaN IMU sample poisoned the EKF permanently and tripped asserts (motor stop on target) "
+         "in both modes. Bad IMU samples are now held for up to 5 ms, then disarm/FAULT; non-finite "
+         "position/ToF/flow are dropped in legacy mode too. Regression tests failed before the fix."],
+        ["1.7 Link protocols", "In progress",
+         "docs/protocols.md: 64-byte P4-C5 SPI frame with CRC-16, 20-byte 50 Hz swarm status, 32-message "
+         "anti-replay window; unit tests + libFuzzer (make link-fuzz); builds on the C5 toolchain. AES-CCM "
+         "envelope specified, not yet built/tested; no SPI/ESP-NOW transport yet."],
+        ["1.9 G3 quality gate", "Started",
+         "cppcheck clean (make core-lint, CI); fc_core sources 91-100% line coverage, but the compiled "
+         "Crazyflie set is 55% overall (unused INDI/Mellinger/planner at 0-5%); clang-tidy not set up."],
     ], [1.35, 0.8, 4.85]), p(
         "4 kHz is a host/SITL configuration, not a measured ESP32-P4 runtime. The production P4 image still uses "
         "the existing ESP-Drone task loop. Driver integration, CPU deadlines, Wi-Fi/camera contention and hardware "

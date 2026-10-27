@@ -384,15 +384,64 @@ static void test_touchdown_dwell_restarts_after_height_rises(void)
     TEST_ASSERT_FALSE(motors_on());
 }
 
-static void test_invalid_estimator_is_fault(void)
+static void test_persistent_bad_imu_is_fault(void)
 {
     hover();
     const float corrupt[3] = {NAN, 0, 0};
-    step(corrupt, LEVEL);
+    for (uint32_t i = 0; i <= FC_MS_TO_TICKS(FC_IMU_BAD_MAX_MS); i++) step(corrupt, LEVEL);
     TEST_ASSERT_EQUAL(FC_FAILSAFE_FAULT, fc_failsafe_state());
     TEST_ASSERT_BITS_HIGH(FC_FAILSAFE_REASON_INVALID_STATE, (unsigned)safety_log("reason"));
     TEST_ASSERT_FALSE(motors_on());
 }
+
+static void test_persistent_bad_imu_disarms_legacy_mode(void)
+{
+    TEST_ASSERT_TRUE(fc_set_failsafe_enabled(false));
+    hover();
+    const float corrupt[3] = {0, 0, INFINITY};
+    for (uint32_t i = 0; i <= FC_MS_TO_TICKS(FC_IMU_BAD_MAX_MS); i++) step(STILL, corrupt);
+    TEST_ASSERT_FALSE(fc_is_armed());
+    TEST_ASSERT_FALSE(motors_on());
+}
+
+/* One corrupt IMU sample must not reach the LPF/EKF: before this fix it made the estimate NaN for good
+ * and tripped cf_sqrt asserts (motor stop on target) in both modes. */
+static void single_bad_imu_sample_is_held(bool safeMode)
+{
+    TEST_ASSERT_TRUE(fc_set_failsafe_enabled(safeMode));
+    hover();
+    fc_host_set_assert_aborts(false);
+    uint32_t asserts = fc_host_assert_count();
+    const float nanGyro[3] = {NAN, 0, 0}, hugeAcc[3] = {0, 0, 1e6f};
+    step(nanGyro, LEVEL);
+    drive(20, true, true, true, 1);
+    step(STILL, hugeAcc);
+    drive(200, true, true, true, 1);
+    fc_host_set_assert_aborts(true);
+    TEST_ASSERT_EQUAL_UINT32(asserts, fc_host_assert_count());
+    TEST_ASSERT_TRUE(isfinite(fc_state()->position.z) && fabsf(fc_state()->position.z - 1) < 0.1f);
+    TEST_ASSERT_TRUE(fc_is_armed());
+    TEST_ASSERT_TRUE(motors_on());
+    TEST_ASSERT_EQUAL(FC_FAILSAFE_NORMAL, fc_failsafe_state());
+}
+
+static void test_legacy_mode_drops_non_finite_measurements(void)
+{
+    TEST_ASSERT_TRUE(fc_set_failsafe_enabled(false));
+    hover();
+    TEST_ASSERT_FALSE(fc_push_position(NAN, 0, 1, 0.01f));
+    TEST_ASSERT_FALSE(fc_push_position(0, 0, 1, 0));
+    TEST_ASSERT_FALSE(fc_push_tof(INFINITY, 0.01f));
+    TEST_ASSERT_FALSE(fc_push_tof(1, NAN));
+    TEST_ASSERT_FALSE(fc_push_flow(NAN, 0, 0.01f, 2));
+    TEST_ASSERT_FALSE(fc_push_flow(0, 0, 0.01f, -1));
+    drive(200, true, true, true, 1);
+    TEST_ASSERT_TRUE(isfinite(fc_state()->position.z) && fabsf(fc_state()->position.z - 1) < 0.1f);
+    TEST_ASSERT_TRUE(fc_is_armed());
+}
+
+static void test_single_bad_imu_sample_is_held_safe_mode(void) { single_bad_imu_sample_is_held(true); }
+static void test_single_bad_imu_sample_is_held_legacy_mode(void) { single_bad_imu_sample_is_held(false); }
 
 static void test_tof_expiry_during_dwell_uses_camera_height_and_restarts_dwell(void)
 {
@@ -581,7 +630,11 @@ int main(void)
     RUN_TEST(test_touchdown_dwell_restarts_after_height_rises);
     RUN_TEST(test_tof_expiry_during_dwell_uses_camera_height_and_restarts_dwell);
     RUN_TEST(test_all_height_expiry_during_dwell_is_fault_not_touchdown);
-    RUN_TEST(test_invalid_estimator_is_fault);
+    RUN_TEST(test_persistent_bad_imu_is_fault);
+    RUN_TEST(test_persistent_bad_imu_disarms_legacy_mode);
+    RUN_TEST(test_legacy_mode_drops_non_finite_measurements);
+    RUN_TEST(test_single_bad_imu_sample_is_held_safe_mode);
+    RUN_TEST(test_single_bad_imu_sample_is_held_legacy_mode);
     RUN_TEST(test_invalid_flow_is_rejected_without_poisoning_estimator);
     RUN_TEST(test_fresh_flow_and_range_select_zero_velocity_braking);
     RUN_TEST(test_ground_stale_or_absent_command_never_starts_landing_motors);
