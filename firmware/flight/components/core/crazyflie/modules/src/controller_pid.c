@@ -11,7 +11,7 @@
 #include "debug_cf.h"
 #include "param.h"
 #include "math3d.h"
-#include <string.h>
+#include <string.h> // ESP-FC Next: memset in controllerPidReset
 
 #define ATTITUDE_UPDATE_DT    (float)(1.0f/ATTITUDE_RATE)
 

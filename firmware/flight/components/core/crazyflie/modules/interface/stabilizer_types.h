@@ -260,7 +260,7 @@ typedef struct {
 // } sweepAngleMeasurement_t;
 
 // Frequencies to bo used with the RATE_DO_EXECUTE_HZ macro. Do NOT use an arbitrary number.
-#define RATE_4000_HZ 4000
+#define RATE_4000_HZ 4000 // ESP-FC Next: 4 kHz loop option
 #define RATE_1000_HZ 1000
 #define RATE_500_HZ 500
 #define RATE_250_HZ 250

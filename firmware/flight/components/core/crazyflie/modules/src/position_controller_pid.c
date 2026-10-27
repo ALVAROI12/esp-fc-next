@@ -202,7 +202,7 @@ void positionController(float* thrust, attitude_t *attitude, setpoint_t *setpoin
   float sinyaw = sinf(state->attitude.yaw * (float)M_PI / 180.0f);
   float bodyvx = setpoint->velocity.x;
   float bodyvy = setpoint->velocity.y;
-  float setvz = setpoint->velocity.z;
+  float setvz = setpoint->velocity.z; // ESP-FC Next: velocity feedforward (velFF) source
 
   // X, Y
   if (setpoint->mode.x == modeAbs) {
@@ -234,7 +234,7 @@ void velocityController(float* thrust, attitude_t *attitude, setpoint_t *setpoin
   // Roll and Pitch
   float rollRaw  = runPid(state->velocity.x, &this.pidVX, setpoint->velocity.x, DT);
   float pitchRaw = runPid(state->velocity.y, &this.pidVY, setpoint->velocity.y, DT);
-  if (accFF > 0.0f) {
+  if (accFF > 0.0f) { // ESP-FC Next: acceleration feedforward as tilt
     rollRaw  += accFF * atanf(setpoint->acceleration.x / 9.81f) * (180.0f / (float)M_PI);
     pitchRaw += accFF * atanf(setpoint->acceleration.y / 9.81f) * (180.0f / (float)M_PI);
   }
@@ -249,6 +249,7 @@ void velocityController(float* thrust, attitude_t *attitude, setpoint_t *setpoin
   // Thrust
   float thrustRaw = runPid(state->velocity.z, &this.pidVZ, setpoint->velocity.z, DT);
   // Scale the thrust and add feed forward term
+  // ESP-FC Next: vertical acceleration feedforward (0 = stock)
   *thrust = thrustRaw*thrustScale + this.thrustBase + accFF * thrustPerAcc * setpoint->acceleration.z;
   // Check for minimum thrust
   if (*thrust < this.thrustMin) {
@@ -334,6 +335,7 @@ PARAM_ADD(PARAM_UINT16, thrustMin, &this.thrustMin)
 PARAM_ADD(PARAM_FLOAT, rpLimit,  &rpLimit)
 PARAM_ADD(PARAM_FLOAT, xyVelMax, &xyVelMax)
 PARAM_ADD(PARAM_FLOAT, zVelMax,  &zVelMax)
+// ESP-FC Next: feedforward params
 PARAM_ADD(PARAM_FLOAT, velFF, &velFF)
 PARAM_ADD(PARAM_FLOAT, accFF, &accFF)
 PARAM_ADD(PARAM_FLOAT, thrustPerAcc, &thrustPerAcc)

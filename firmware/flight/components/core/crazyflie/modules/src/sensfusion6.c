@@ -24,6 +24,7 @@
  *
  */
 #include <math.h>
+// ESP-FC Next: int32_t/memcpy for the S2 invSqrt and sdkconfig for the FPU switch below.
 #include <stdint.h>
 #include <string.h>
 
@@ -295,6 +296,7 @@ float sensfusion6GetInvThrustCompensationForTilt()
 float invSqrt(float x)
 {
 #ifdef CONFIG_IDF_TARGET_ESP32S2
+  // ESP-FC Next: S2 path keeps the approximation, without the 64-bit `long` pointer-cast UB.
   // Fast inverse square root (one Newton step, ~0.175% error) for the FPU-less ESP32-S2.
   // 32-bit integer + memcpy: `long` is 64-bit on PC hosts and the pointer cast was undefined behavior.
   float halfx = 0.5f * x;
