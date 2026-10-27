@@ -24,6 +24,7 @@ from model.params import DEFAULT_TIMING, PLANNED_TIMING, WHOOP_2IN, LoopTiming, 
 from model.vibration import VibrationSpec
 from sitl import SitlDrone
 from sitl.drone import figure8
+from failsafe_report import fly_loss, NAMES as SAFETY_NAMES
 
 HERE = Path(__file__).resolve().parent
 TEMPLATE = HERE / "viewer" / "viewer.html"
@@ -180,9 +181,30 @@ def fly_vibration(label: str, color: str, notch: bool) -> dict:
         "stats": (f"gyro artifact RMS {np.std(artifact):.2f} deg/s -> {np.std(notched):.2f} deg/s | "
                   f"hover max {100 * worst:.2f} cm | asserts {d.fw.assert_count}"),
         "lost": None,
-        "t": r(t), "pos": r(log["pos"]), "quat": r(log["quat"], 5), "motors": r(log["motors"]),
+        "t": r(t, 6), "pos": r(log["pos"]), "quat": r(log["quat"], 5), "motors": r(log["motors"]),
         "series": {"artifact": r(artifact, 2), "notched": r(notched, 2), "error": r(error * 100, 2),
                    "m1": r(log["motors"][:, 0] * 100, 2)},
+    }
+
+
+def fly_failsafe(label: str, color: str, kind: str, *, moving: bool = False,
+                 recover_after: float | None = None) -> dict:
+    result = fly_loss("whoop2_4k", kind, moving=moving, recover_after=recover_after)
+    log = result["log"]
+    terminal = SAFETY_NAMES[int(log["safety"][-1])]
+    drift = np.linalg.norm(log["pos"][:, :2] - log["pos"][0, :2], axis=1)
+    return {
+        "label": label, "color": color,
+        "note": ("Independent local ToF; XY hold only with fresh camera tracking. "
+                 "LAND is latched even if commands return. No collision/XY-drift guarantee after camera loss."),
+        "status": "ok" if result["passed"] and kind != "height" else "bad",
+        "badge": "Final: " + terminal + (" (not a controlled landing)" if kind == "height" else ""),
+        "stats": (f"max XY excursion {result['max_drift']:.2f} m | "
+                  + " -> ".join(f"{name}@{t:.2f}s" for t, name in result["sequence"])),
+        "lost": None, "t": r(log["t"] - log["t"][0]),
+        "pos": r(log["pos"]), "quat": r(log["quat"], 5), "motors": r(log["motors"]),
+        "series": {"height": r(log["pos"][:, 2]), "vz": r(log["velocity"][:, 2]),
+                   "safety": r(log["safety"], 0), "drift": r(drift)},
     }
 
 
@@ -216,9 +238,24 @@ def scenarios() -> list[dict]:
                 fly_tracking("4 kHz + feedforward", COLORS[2], "whoop2_4k")]
     flow = [fly_tracking("Flow + height only", COLORS[0], "whoop2_interim", "flow")]
     vibration = [fly_vibration("Notch off", COLORS[0], False), fly_vibration("RPM notch on", COLORS[2], True)]
+    failsafe = [fly_failsafe("Command loss, hover", COLORS[2], "command"),
+                fly_failsafe("Both links lost, moving", COLORS[1], "both", moving=True),
+                fly_failsafe("Radio returns during LAND", COLORS[3], "command", moving=True, recover_after=2.5)]
 
     maneuver = "Roll doublet (+15 deg, -15 deg, level) with altitude hold, then a gust (roll torque kick) at t = 2.0 s."
     return [
+        {"id": "failsafe", "title": "Latched link-loss landing (opt-in C SITL)",
+         "description": ("Input loss at t=0. Command-only loss captures a fixed pose after 500 ms, holds 1.5 s, "
+                         "then descends. Camera loss starts level descent after 300 ms using local ToF, without "
+                         "trusting stale XY. State 0=NORMAL, 1=HOLD, 2=LAND, 3=LANDED, 4=FAULT. "
+                         "Renewed commands cannot cancel LAND. Drift after tracking loss remains unbounded; "
+                         "not collision-safe swarm flight or hardware validation."),
+         "duration": failsafe[0]["t"][-1], "spacing": 2.4, "camera": [1.6, 2.5, 6.8], "target_y": 0.6,
+         "charts": [{"title": "True height (m)", "series": "height"},
+                    {"title": "True vertical speed (m/s)", "series": "vz"},
+                    {"title": "Safety state (0 normal / 1 hold / 2 land / 3 landed / 4 fault)", "series": "safety"},
+                    {"title": "XY excursion since loss (m) - not bounded after camera loss", "series": "drift"}],
+         "drones": failsafe},
         {"id": "figure8", "title": "Task 1.6: figure-8 tracking (C SITL)",
          "description": ("Two laps of a 1.2 m-wide figure-8 with an 8 s period, at 1 m altitude. "
                          "Both drones use 100 Hz external camera position measurements. Dashed curves are targets. "

@@ -10,6 +10,11 @@ bank (Task 1.6b, synthetic vibration only) are tested in simulation. The product
 uses ESP-Drone's original task loop; the new runtime has not been activated or timing-validated on
 hardware. Flow-only absolute XY positioning remains an open failure.
 
+An **opt-in latched hold-and-land supervisor** now has command/camera-loss SITL tests and a
+[report](sim/reports/failsafe/README.md). Renewed commands cannot cancel LAND. Moving camera loss
+still allows substantial XY drift; losing all height sources causes a separate fault/motor stop,
+not guaranteed safe landing. It is not collision-safe or hardware-validated.
+
 ## Layout
 
 | Path | Contents |
@@ -43,6 +48,7 @@ make sim-setup
 | `make sim-test` | Run simulation and model tests |
 | `make g1` | Gate G1 math-model report ([`sim/reports/g1`](sim/reports/g1/README.md)) |
 | `make vibration` | Task 1.6b vibration/notch report ([`sim/reports/vibration`](sim/reports/vibration/README.md)) |
+| `make failsafe` | Opt-in latched landing/fault evidence ([`sim/reports/failsafe`](sim/reports/failsafe/README.md)) |
 | `make viewer` | Interactive 3D simulation replay with charts (opens in the browser) |
 | `make pdf` | Regenerate the project plan PDF |
 

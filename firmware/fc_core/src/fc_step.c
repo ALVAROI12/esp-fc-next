@@ -28,6 +28,7 @@
 static struct {
     uint32_t tick;
     bool armed;
+    uint32_t armTick;
     bool emergencyStop;
     bool tumbled;
     uint32_t tumbleTicks;
@@ -57,10 +58,58 @@ static struct {
     setpoint_t activeSetpoint; /* after the watchdog */
     uint32_t setpointTick;
     bool haveSetpoint;
+
+    /* Opt-in safety history; all storage is fixed-size and cleared by fc_init(). */
+    uint8_t safetyState, safetyReason, posFresh, tofFresh;
+    bool havePosition, haveTof, landXYDisabled, touchdownPending;
+    uint32_t positionTick, tofTick, holdTick, landTick, touchdownTick, estimatorResets;
+    float holdX, holdY, holdZ, holdYaw, tofHeight, height;
 } fc;
 static bool controllerInitialized;
 static bool rpmNotchEnabled;
 static float rpmNotchQ = 5.0f;
+static bool failsafeEnabled;
+
+static float vertical_cosine(void)
+{
+    const quaternion_t *q = &fc.state.attitudeQuaternion;
+    return 1.0f - 2.0f * (q->x * q->x + q->y * q->y);
+}
+
+static bool position_fresh(void)
+{
+    return fc.havePosition &&
+           (uint32_t)(fc.tick - fc.positionTick) <= FC_MS_TO_TICKS(FC_FAILSAFE_POSITION_TIMEOUT_MS);
+}
+
+static bool tof_fresh(void)
+{
+    return fc.haveTof && vertical_cosine() >= 0.5f &&
+           (uint32_t)(fc.tick - fc.tofTick) <= FC_MS_TO_TICKS(FC_FAILSAFE_TOF_TIMEOUT_MS);
+}
+
+static bool state_valid(void)
+{
+    float values[13];
+    fc_get_state_array(values);
+    for (unsigned i = 0; i < 13; i++) if (!isfinite(values[i])) return false;
+    /* Match the estimator's default position/velocity envelope; also reject corrupt quaternions. */
+    for (unsigned i = 0; i < 3; i++) {
+        if (fabsf(values[i]) > 100.0f || fabsf(values[i + 3]) > 10.0f) return false;
+    }
+    float qnorm = 0;
+    for (unsigned i = 9; i < 13; i++) qnorm += values[i] * values[i];
+    return qnorm > 0.9f && qnorm < 1.1f;
+}
+
+bool fc_set_failsafe_enabled(bool enabled)
+{
+    if (fc.armed) return false;
+    failsafeEnabled = enabled;
+    return true;
+}
+
+fc_failsafe_state_t fc_failsafe_state(void) { return (fc_failsafe_state_t)fc.safetyState; }
 
 void fc_init(void)
 {
@@ -74,6 +123,7 @@ void fc_init(void)
     }
     fc.state.attitudeQuaternion.w = 1.0f;
     fcKalmanInit();
+    fc.estimatorResets = fcKalmanResetCount();
     if (!controllerInitialized) {
         controllerInit(ControllerTypePID);
         controllerInitialized = true;
@@ -146,14 +196,18 @@ bool fc_arm(bool armed)
     float ax = fc.sensors.acc.x, ay = fc.sensors.acc.y, az = fc.sensors.acc.z;
     float norm = sqrtf(ax * ax + ay * ay + az * az);
     if (fc.phase != FC_PHASE_READY || fc.emergencyStop || fc.tumbled ||
+        (!fc.armed && fc.safetyState >= FC_FAILSAFE_LAND) ||
+        (failsafeEnabled && (!position_fresh() || !tof_fresh() || !state_valid())) ||
         !isfinite(norm) || norm < 0.8f || norm > 1.2f ||
         az / norm < cosf(FC_ARM_MAX_TILT_DEG * 0.0174532925f) || tilt_deg() > FC_ARM_MAX_TILT_DEG) {
         return false;
     }
     if (fc.armed) return true; /* idempotent: do not reset the lift-off reference midflight */
     fc.armed = true;
+    fc.armTick = fc.tick;
     fc.airborne = false;
     fc.groundZ = fc.state.position.z;
+    fc.estimatorResets = fcKalmanResetCount();
     return true;
 }
 
@@ -209,14 +263,34 @@ void fc_set_trajectory_setpoint(float x, float y, float z, float vx, float vy, f
 
 bool fc_push_position(float x, float y, float z, float std_dev)
 {
+    bool qualified = isfinite(x) && isfinite(y) && isfinite(z) &&
+        fabsf(x) <= 100.0f && fabsf(y) <= 100.0f && fabsf(z) <= 100.0f &&
+        isfinite(std_dev) && std_dev > 0 && std_dev <= 10.0f;
+    if (failsafeEnabled && !qualified) return false;
     positionMeasurement_t m = {.x = x, .y = y, .z = z, .stdDev = std_dev};
-    return fcKalmanPushPosition(&m);
+    if (!fcKalmanPushPosition(&m)) return false;
+    if (qualified) {
+        fc.havePosition = true;
+        fc.positionTick = fc.tick;
+    }
+    return true;
 }
 
 bool fc_push_tof(float distance_m, float std_dev)
 {
+    float r22 = vertical_cosine();
+    bool qualified = isfinite(distance_m) && distance_m >= 0 && distance_m <= FC_FAILSAFE_MAX_TOF_M &&
+        isfinite(std_dev) && std_dev > 0 && std_dev <= 10.0f && isfinite(r22) && r22 >= 0.5f;
+    /* Do not impose the supervisor's narrower operating envelope on legacy EKF input. */
+    if (failsafeEnabled && !qualified) return false;
     tofMeasurement_t m = {.timestamp = fc.tick, .distance = distance_m, .stdDev = std_dev};
-    return fcKalmanPushTof(&m);
+    if (!fcKalmanPushTof(&m)) return false;
+    if (qualified) {
+        fc.haveTof = true;
+        fc.tofTick = fc.tick;
+        fc.tofHeight = distance_m * fminf(r22, 1.0f);
+    }
+    return true;
 }
 
 bool fc_push_flow(float dpixel_x, float dpixel_y, float dt, float std_dev)
@@ -280,6 +354,129 @@ static void apply_watchdog(void)
     }
 }
 
+static void safety_fault(uint8_t reason)
+{
+    fc.safetyReason |= reason;
+    fc.safetyState = FC_FAILSAFE_FAULT;
+    fc.armed = false;
+    memset(&fc.activeSetpoint, 0, sizeof(fc.activeSetpoint));
+}
+
+static void capture_hold(void)
+{
+    fc.holdX = fc.state.position.x;
+    fc.holdY = fc.state.position.y;
+    fc.holdZ = fc.state.position.z;
+    fc.holdYaw = fc.state.attitude.yaw;
+    fc.holdTick = fc.tick;
+    positionControllerResetAllPID();
+}
+
+static void start_land(void)
+{
+    fc.safetyState = FC_FAILSAFE_LAND;
+    fc.landTick = fc.tick;
+    fc.landXYDisabled = !fc.posFresh;
+}
+
+static void apply_failsafe(const float gyro[3], const float acc[3])
+{
+    fc.posFresh = position_fresh();
+    fc.tofFresh = tof_fresh();
+    if (fc.safetyState >= FC_FAILSAFE_LANDED) {
+        fc.armed = false; /* Terminal latches cannot be bypassed by disabling this option. */
+        memset(&fc.activeSetpoint, 0, sizeof(fc.activeSetpoint));
+        return;
+    }
+    if (!failsafeEnabled || !fc.armed || fc.emergencyStop || fc.tumbled) return;
+
+    bool valid = state_valid() && fcKalmanResetCount() == fc.estimatorResets;
+    for (unsigned i = 0; i < 3; i++) valid &= isfinite(gyro[i]) && isfinite(acc[i]);
+    if (!valid) {
+        safety_fault(FC_FAILSAFE_REASON_INVALID_STATE);
+        return;
+    }
+    bool commandFresh = fc.haveSetpoint &&
+        (uint32_t)(fc.tick - fc.setpointTick) <= FC_MS_TO_TICKS(FC_SETPOINT_TIMEOUT_STABILIZE_MS);
+    if (fc.safetyState < FC_FAILSAFE_LAND) {
+        if (!fc.haveSetpoint) {
+            /* A 100 Hz commander may deliver its first point after arming. Grace is thrust-free. */
+            if ((uint32_t)(fc.tick - fc.armTick) > FC_MS_TO_TICKS(FC_SETPOINT_TIMEOUT_STABILIZE_MS))
+                fc.armed = false;
+            memset(&fc.activeSetpoint, 0, sizeof(fc.activeSetpoint));
+            return;
+        }
+        /* Never turn a missing/stale ground command into an autonomous takeoff. */
+        if (!fc.airborne && (!commandFresh || !fc.posFresh)) {
+            fc.armed = false;
+            memset(&fc.activeSetpoint, 0, sizeof(fc.activeSetpoint));
+            return;
+        }
+        if (!fc.posFresh) {
+            fc.safetyReason |= FC_FAILSAFE_REASON_TRACK;
+            if (fc.safetyState == FC_FAILSAFE_NORMAL) capture_hold();
+            start_land();
+        } else if (!commandFresh) {
+            fc.safetyReason |= FC_FAILSAFE_REASON_CMD;
+            if (fc.safetyState == FC_FAILSAFE_NORMAL) {
+                capture_hold();
+                fc.safetyState = FC_FAILSAFE_HOLD;
+            } else if ((uint32_t)(fc.tick - fc.holdTick) >= FC_MS_TO_TICKS(FC_FAILSAFE_HOLD_MS)) {
+                start_land();
+            }
+        } else if (fc.safetyState == FC_FAILSAFE_HOLD) {
+            fc.safetyState = FC_FAILSAFE_NORMAL;
+        }
+    }
+    if (fc.safetyState == FC_FAILSAFE_NORMAL) return;
+
+    /* Build from zero every tick: no mission velocity, acceleration or attitude-rate feedforward. */
+    memset(&fc.activeSetpoint, 0, sizeof(fc.activeSetpoint));
+    fc.activeSetpoint.mode.x = fc.activeSetpoint.mode.y = fc.activeSetpoint.mode.z = modeAbs;
+    fc.activeSetpoint.mode.yaw = modeAbs;
+    fc.activeSetpoint.position.x = fc.holdX;
+    fc.activeSetpoint.position.y = fc.holdY;
+    fc.activeSetpoint.position.z = fc.holdZ;
+    fc.activeSetpoint.attitude.yaw = fc.holdYaw;
+    if (fc.safetyState == FC_FAILSAFE_HOLD) return;
+
+    if (!commandFresh) fc.safetyReason |= FC_FAILSAFE_REASON_CMD;
+    if (!fc.posFresh) {
+        fc.safetyReason |= FC_FAILSAFE_REASON_TRACK;
+        fc.landXYDisabled = true; /* Never reacquire a potentially jumped camera reference. */
+    }
+    if (fc.landXYDisabled) {
+        fc.activeSetpoint.mode.x = fc.activeSetpoint.mode.y = modeDisable;
+        fc.activeSetpoint.mode.roll = fc.activeSetpoint.mode.pitch = modeAbs;
+    }
+    if (!fc.tofFresh && !fc.posFresh) {
+        safety_fault(FC_FAILSAFE_REASON_HEIGHT);
+        return;
+    }
+    fc.height = fc.tofFresh ? fc.tofHeight : fc.state.position.z - fc.groundZ;
+    if ((uint32_t)(fc.tick - fc.landTick) >= FC_MS_TO_TICKS(FC_FAILSAFE_LAND_TIMEOUT_MS)) {
+        safety_fault(FC_FAILSAFE_REASON_TIMEOUT);
+        return;
+    }
+    fc.activeSetpoint.mode.z = modeVelocity;
+    fc.activeSetpoint.velocity.z = fc.height < FC_FAILSAFE_SLOW_HEIGHT_M ?
+        -FC_FAILSAFE_SLOW_DESCENT_MPS : -FC_FAILSAFE_DESCENT_MPS;
+    if (fc.height <= FC_FAILSAFE_TOUCHDOWN_HEIGHT_M &&
+        fabsf(fc.state.velocity.z) <= FC_FAILSAFE_TOUCHDOWN_SPEED_MPS) {
+        if (!fc.touchdownPending) {
+            fc.touchdownTick = fc.tick;
+            fc.touchdownPending = true;
+        }
+        if ((uint32_t)(fc.tick - fc.touchdownTick) >= FC_MS_TO_TICKS(FC_FAILSAFE_TOUCHDOWN_MS)) {
+            fc.safetyState = FC_FAILSAFE_LANDED;
+            fc.armed = false;
+            memset(&fc.activeSetpoint, 0, sizeof(fc.activeSetpoint));
+        }
+    } else {
+        fc.touchdownPending = false;
+    }
+}
+
 void fc_step(const float gyro_dps[3], const float acc_g[3])
 {
     fc.tick++;
@@ -302,13 +499,6 @@ void fc_step(const float gyro_dps[3], const float acc_g[3])
     control_t appliedControl = fc.control;
     if (!fc.armed || fc.emergencyStop) appliedControl.thrust = 0;
     fcKalmanUpdate(&fc.state, &fc.sensors, &appliedControl, fc.tick);
-    apply_watchdog();
-    if (!fc.armed || fc.emergencyStop) {
-        controllerPidReset(&fc.state);
-        memset(&fc.control, 0, sizeof(fc.control));
-        powerStop();
-        return;
-    }
     /*
      * Anti-windup while landed: until lift-off the vehicle cannot follow the setpoint, so position and
      * velocity integrators would wind up and overshoot after lift-off. Proportional terms still act.
@@ -321,9 +511,10 @@ void fc_step(const float gyro_dps[3], const float acc_g[3])
         }
     }
 
-    controller(&fc.control, &fc.activeSetpoint, &fc.sensors, &fc.state, fc.tick);
+    apply_watchdog();
+    apply_failsafe(gyro_dps, acc_g);
 
-    /* Supervisor: a sustained large tilt while armed means a crash or flip -> stop motors. */
+    /* Tumble protection also runs during the thrust-free first-command grace period. */
     if (fc.armed && tilt_deg() > FC_TUMBLE_TILT_DEG) {
         if (++fc.tumbleTicks >= FC_MS_TO_TICKS(FC_TUMBLE_TIME_MS)) {
             fc.tumbled = true;
@@ -332,6 +523,14 @@ void fc_step(const float gyro_dps[3], const float acc_g[3])
     } else {
         fc.tumbleTicks = 0;
     }
+    if (!fc.armed || fc.emergencyStop || (failsafeEnabled && !fc.haveSetpoint)) {
+        controllerPidReset(&fc.state);
+        memset(&fc.control, 0, sizeof(fc.control));
+        powerStop();
+        return;
+    }
+
+    controller(&fc.control, &fc.activeSetpoint, &fc.sensors, &fc.state, fc.tick);
 
     if (fc.armed && !fc.emergencyStop) {
         powerDistribution(&fc.control);
@@ -363,6 +562,17 @@ LOG_ADD(LOG_FLOAT, biasY, &fc.gyroBias[1])
 LOG_ADD(LOG_FLOAT, biasZ, &fc.gyroBias[2])
 LOG_ADD(LOG_FLOAT, accScale, &fc.accScale)
 LOG_GROUP_STOP(fcStep)
+
+LOG_GROUP_START(fcSafety)
+LOG_ADD(LOG_UINT8, state, &fc.safetyState)
+LOG_ADD(LOG_UINT8, reason, &fc.safetyReason)
+LOG_ADD(LOG_UINT8, posFresh, &fc.posFresh)
+LOG_ADD(LOG_UINT8, tofFresh, &fc.tofFresh)
+LOG_ADD(LOG_FLOAT, holdX, &fc.holdX)
+LOG_ADD(LOG_FLOAT, holdY, &fc.holdY)
+LOG_ADD(LOG_FLOAT, holdZ, &fc.holdZ)
+LOG_ADD(LOG_FLOAT, height, &fc.height)
+LOG_GROUP_STOP(fcSafety)
 
 LOG_GROUP_START(fcGyro)
 LOG_ADD(LOG_FLOAT, rawX, &fc.rawGyro[0])

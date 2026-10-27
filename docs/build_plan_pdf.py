@@ -129,7 +129,7 @@ def on_page(canvas, doc):
     canvas.saveState()
     canvas.setFont("Helvetica", 7.5)
     canvas.setFillColor(colors.grey)
-    canvas.drawString(0.75 * inch, 0.5 * inch, "ESP-FC Next - Project Plan v1.3")
+    canvas.drawString(0.75 * inch, 0.5 * inch, "ESP-FC Next - Project Plan v1.4")
     canvas.drawRightString(7.75 * inch, 0.5 * inch, f"Page {doc.page}")
     canvas.setStrokeColor(GRID)
     canvas.line(0.75 * inch, 0.62 * inch, 7.75 * inch, 0.62 * inch)
@@ -146,7 +146,7 @@ def build():
     s.append(table([
         ["Item", "Value"],
         ["Document", "Project plan, gap analysis and Phase 1 task list"],
-        ["Version / date", f"v1.3 - {date.today():%B %d, %Y}"],
+        ["Version / date", f"v1.4 - {date.today():%B %d, %Y}"],
         ["Base project", "Espressif ESP-Drone (GPL-3.0), master after PR #137 (ESP-IDF 5.5 / 6.1)"],
         ["First target", "Indoor swarm of 4 drones, USA"],
         ["Guiding rule", "Nothing is ordered or assembled until math, simulation and code/PCB review gates pass"],
@@ -193,7 +193,7 @@ def build():
     s.append(p("rtlopez/esp-fc (Betaflight-configurator-compatible ESP32 firmware), ArduPilot's experimental "
                "ESP32 port, Crazyflie upstream, and the open-source Low-Cost-Mocap project (ESP32 drone swarm "
                "with PS3 Eye cameras)."))
-    s.append(KeepTogether([p("Progress so far (v1.3)", H2), table([
+    s.append(KeepTogether([p("Progress so far (v1.4)", H2), table([
         ["Task", "Status", "Key result"],
         ["1.1 Repo + toolchain", "Done", "Private GitHub repo, Docker ESP-IDF 5.5 (Colima), CI builds P4 + S3 + C5 firmware"],
         ["1.2 Portable flight core", "Done", "18 Crazyflie algorithm files build on the PC unchanged (fc_core); HAL = existing driver interfaces"],
@@ -215,6 +215,11 @@ def build():
          "100 ms bypass. 12 deg/s assumed artifact: 3.8 -> 0.20 deg/s RMS; motor activity >250 Hz 3.1% -> 1.9% "
          "(baseline 1.9%). Hover/figure-8 tracking unchanged (LPF already attenuates the band). 500 Hz notch floor; "
          "worst sampled RPM/32-corner margin 46.2 deg / 6.9 dB (hover only: 47.5 deg / 7.2 dB)."],
+        ["Safety: hold + landing", "Opt-in SITL; hardware pending",
+         "Command loss: fixed-pose hold then descent; camera loss: level descent with independent local ToF. "
+         "LAND stays latched through touchdown, even if commands return; terminal states block automatic rearm. "
+         "Nominal 1/4 kHz SITL: max descent 0.263 m/s, sampled touchdown approach 0.093-0.102 m/s; motors off at ground. "
+         "All-height loss is a separate FAULT/motor stop, not safe landing."],
     ], [1.35, 0.8, 4.85]), p(
         "4 kHz is a host/SITL configuration, not a measured ESP32-P4 runtime. The production P4 image still uses "
         "the existing ESP-Drone task loop. Driver integration, CPU deadlines, Wi-Fi/camera contention and hardware "
@@ -226,7 +231,12 @@ def build():
         "an all-speed or hardware guarantee. RPM calibration, "
         "pole-pair conversion, ESC telemetry latency and real vibration spectra require hardware blackbox data. "
         "The 4 kHz runtime remains host/SITL only; the production P4 image still uses the existing ESP-Drone task "
-        "loop.", NOTE)]))
+        "loop.", NOTE), p(
+        "Latched landing is opt-in in the portable runtime, not activated on hardware. Thresholds and touchdown "
+        "dwell are engineering assumptions. Moving camera-loss tests drift about 1.7-2.0 m horizontally, so this does not "
+        "provide collision-safe swarm flight; "
+        "all-height loss can still cause a fall. Finite frozen/replayed sensor data is not detected. "
+        "The four-drone fault/landing acceptance gate remains open; nominal single-drone tests do not pass it.", NOTE)]))
     s.append(PageBreak())
 
     # ---------------- 2. Gap analysis ----------------

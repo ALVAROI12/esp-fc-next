@@ -62,10 +62,13 @@ make core-coverage   # coverage summary + HTML report in build/coverage/index.ht
 | `test_fc_step` / `_4k` | Calibration, immediate tilted/inverted arm refusal, tumble latch, watchdog feedforward clearing, reset and profile semantics |
 | `test_position_feedforward` / `_4k` | Stock-default compatibility and velocity/acceleration feedforward equations |
 | `test_rpm_notch` | Bypass, 1x/2x rejection, low-frequency preservation, retuning sweep, activation continuity, invalid/aliased RPM |
+| `test_failsafe` / `_4k` | Opt-in arming/grace, fixed-pose hold, latched descent, height freshness/dwell, terminal motor/rearm behavior, emergency overrides and disabled-mode legacy fusion |
 
 Run `make core-coverage` for current measured coverage. INDI, Mellinger, the trajectory planner,
 and several optional Kalman measurements still lack comprehensive tests; the 80% whole-core
 quality gate has not been met.
+After latched-landing regressions: 54.0% lines, 55.3% functions and 57.0% branches in the
+configured coverage scope. Passing these tests does not close G3.
 
 ## fc_step: the synchronous flight loop (Task 1.5)
 
@@ -154,10 +157,58 @@ hardware blackbox measurements before flight.
 
 - **Hardware integration:** SPI IMU/DShot drivers, target profile hook and startup/task integration;
   measure 4 kHz deadlines on the P4 before activation (not proved by a host timing configuration).
-- **Link-loss safety:** replace cut-motors with position hold and a controlled landing, including
-  camera-tracking loss; test the moving-trajectory case.
+- **Link-loss safety:** see the opt-in design and evidence below; validate range/ground offsets,
+  stale-sensor detection and physical touchdown before enabling on hardware.
 - **Four-drone swarm simulation:** coordinated takeoff/landing, formation, collision and packet loss.
 - **FLOW-01:** flow/ToF alone does not meet absolute XY positioning accuracy. See `sim/README.md`.
+
+## Opt-in latched hold-and-land
+
+Design: `docs/plans/2026-10-27-link-loss-design.md`. The stock/reference watchdog remains the
+default; the new policy is enabled explicitly with `fc_set_failsafe_enabled(true)` while disarmed.
+Safe mode requires fresh external position and independent downward ToF before arming. It does
+not activate a new production P4 task loop or change any CRTP packet formats.
+
+| State | Behavior |
+| --- | --- |
+| NORMAL (0) | Use mission commands; after 500 ms command silence capture current estimated pose |
+| HOLD (1) | Fixed pose, zero stale trajectory feedforward; after 1.5 s enter LAND; fresh commands may resume before LAND |
+| LAND (2) | Latched descent, nominally 0.25 m/s, slowing to 0.10 m/s below 15 cm; renewed mission commands cannot cancel it |
+| LANDED (3) | Height <= 4 cm and estimated vertical speed <= 0.15 m/s for 500 ms: disarm and block automatic rearm |
+| FAULT (4) | Missing trustworthy height, invalid state, or landing timeout: motor stop; **not** successful controlled landing |
+
+Camera input older than 300 ms triggers LAND even if commands still arrive. XY hold is allowed only
+with fresh tracking; after tracking loss the remainder of that landing uses level roll/pitch and
+does not reacquire a potentially jumped XY reference. Independent ToF (200 ms freshness, tilt checked)
+supports vertical control; fresh camera height relative to the arming ground is a fallback. A 20 s
+landing timeout bounds a stuck descent. Emergency stop, explicit disarm and tumble remain authoritative.
+LANDED/FAULT require explicit ground reinitialization, not automatic restart when the radio recovers.
+
+`fc_failsafe_state()` and `fcSafety` logs expose state/reason/held pose and input freshness.
+`make failsafe` generates `sim/reports/failsafe/README.md` and height/speed/state plots from C SITL;
+the viewer scenario is `?scenario=failsafe`. `SitlDrone(..., safe_landing=True)` adds independent
+local ToF; `link_up`, `tracking_up` and `height_up` independently gate command, camera and range delivery.
+
+Nominal seed-9 SITL at 1/4 kHz: controlled cases reach LANDED about 5.24-7.05 s after loss,
+max descent about 0.263 m/s, sampled final approach 0.093-0.102 m/s, and motor disarm at ground.
+Restored commands during LAND do not restart flight. Moving camera-only loss still produces
+about **1.7 m XY excursion**, rising to about **2.0 m** with the restored/jumped camera reference
+(combined loss about 1.3 m), so this is not collision-safe swarm flight.
+The all-height-loss cases instead stop motors around 1 m height and fall: a tested fault path,
+not a safe-landing pass. See the report for the exact cases, gates and sampled metrics.
+
+Review regressions also cover local-range expiry during the touchdown dwell (camera-height fallback
+must reset it; losing both sources must FAULT), and restored camera input with a (+0.5, -0.4, 0) m
+reference jump during LAND. Actual controller roll/pitch targets remain zero after that restoration.
+Safety qualification does not narrow the disabled/legacy estimator's range/tilt acceptance; a
+both-rate regression checks legacy ToF acceptance at >60-degree tilt separately from supervisor trust.
+
+Thresholds are engineering assumptions, not certified limits. Input age is receipt age, not proof of
+acquisition time, covariance or accuracy: plausible frozen/replayed data is not detected. Touchdown is
+a height/vertical-speed dwell heuristic, not a contact sensor. No bounded XY drift is claimed after
+camera loss, especially while moving. All-height-loss fault containment can cause a fall and must
+never be counted as a successful controlled landing. Hardware sensor offsets, occlusion, ground
+geometry and touchdown remain unvalidated; FLOW-01 is unchanged.
 
 ## Patches applied to the ESP-Drone subtree
 

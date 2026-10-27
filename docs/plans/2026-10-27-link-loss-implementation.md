@@ -48,3 +48,16 @@ Files: `sim/failsafe_report.py`, `sim/visualize.py`, `Makefile`,
 5. Run `make core-test`, `make sim-test`, `make failsafe`, `make core-coverage`, `make flight`.
 6. Update and visually inspect PDF/replay. Run `git diff --check`, commit/push only verified changes,
    watch CI, and report measured results plus remaining hardware and localization limits.
+
+## Verification notes
+
+- C tests demonstrated invalid-packet and first-command-grace failures before their fixes.
+- SITL caught immediate disarming before the first 100 Hz command; safe-mode arming now awaits
+  fresh post-calibration measurements and the supervisor allows a bounded thrust-free command grace.
+- Independent review found unconditional ToF safety qualification changed disabled/legacy fusion.
+  A both-rate regression failed at the legacy tilted-packet acceptance assertion before the fix;
+  legacy enqueueing and supervisor freshness qualification are now separate.
+- Added range-expiry-during-touchdown-dwell cases and actual controller-target checks after a
+  restored/jumped camera reference. Failsafe state alone is not treated as sufficient evidence.
+- Nominal C SITL demonstrates controlled vertical touchdown, not collision-safe swarm operation:
+  moving camera-loss cases drift about 1.7 m; all-height-loss FAULT can cause a fall.

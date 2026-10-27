@@ -27,6 +27,7 @@ PROFILE_VARIANT = {"stock": "1k", "whoop2_interim": "1k", "whoop2_4k": "4k"}
 
 PHASE_CALIBRATING = 0
 PHASE_READY = 1
+FAILSAFE_NORMAL, FAILSAFE_HOLD, FAILSAFE_LAND, FAILSAFE_LANDED, FAILSAFE_FAULT = range(5)
 
 _build_lock = threading.Lock()
 _instance_dir = Path(tempfile.mkdtemp(prefix="fc_sitl_"))
@@ -100,6 +101,8 @@ class FlightFirmware:
             "fc_push_flow": (b, [f, f, f, f]),
             "fc_set_rpm_notch": (b, [b, f]),
             "fc_push_rpm": (b, [C.POINTER(f)]),
+            "fc_set_failsafe_enabled": (b, [b]),
+            "fc_failsafe_state": (C.c_int, []),
             "fc_step": (None, [C.POINTER(f), C.POINTER(f)]),
             "fc_get_state_array": (None, [C.POINTER(f)]),
             "fc_host_motor_ratio": (u16, [u32]),
@@ -151,6 +154,14 @@ class FlightFirmware:
         return int(self._lib.fc_tick())
 
     # ---- inputs ----
+    def set_failsafe_enabled(self, enabled: bool = True) -> None:
+        if not self._lib.fc_set_failsafe_enabled(enabled):
+            raise FirmwareError("failsafe configuration rejected: disarm first")
+
+    @property
+    def failsafe_state(self) -> int:
+        return int(self._lib.fc_failsafe_state())
+
     def set_rpm_notch(self, enabled: bool, q: float = 5.0) -> None:
         if not self._lib.fc_set_rpm_notch(enabled, q):
             raise FirmwareError("RPM notch configuration rejected: disarm and use finite Q in [1, 50]")

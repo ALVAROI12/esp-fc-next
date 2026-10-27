@@ -49,6 +49,37 @@ typedef enum {
     FC_PHASE_READY = 1,
 } fc_phase_t;
 
+/* Opt-in link-loss supervisor; configuration persists across fc_init(), history does not. */
+typedef enum {
+    FC_FAILSAFE_NORMAL = 0,
+    FC_FAILSAFE_HOLD = 1,
+    FC_FAILSAFE_LAND = 2,
+    FC_FAILSAFE_LANDED = 3,
+    FC_FAILSAFE_FAULT = 4,
+} fc_failsafe_state_t;
+
+#define FC_FAILSAFE_REASON_CMD 1u
+#define FC_FAILSAFE_REASON_TRACK 2u
+#define FC_FAILSAFE_REASON_HEIGHT 4u
+#define FC_FAILSAFE_REASON_TIMEOUT 8u
+#define FC_FAILSAFE_REASON_INVALID_STATE 16u
+#define FC_FAILSAFE_POSITION_TIMEOUT_MS 300
+#define FC_FAILSAFE_TOF_TIMEOUT_MS 200
+#define FC_FAILSAFE_HOLD_MS 1500
+#define FC_FAILSAFE_LAND_TIMEOUT_MS 20000
+#define FC_FAILSAFE_TOUCHDOWN_MS 500
+#define FC_FAILSAFE_DESCENT_MPS 0.25f
+#define FC_FAILSAFE_SLOW_DESCENT_MPS 0.10f
+#define FC_FAILSAFE_SLOW_HEIGHT_M 0.15f
+#define FC_FAILSAFE_TOUCHDOWN_HEIGHT_M 0.04f
+#define FC_FAILSAFE_TOUCHDOWN_SPEED_MPS 0.15f
+#define FC_FAILSAFE_MAX_TOF_M 4.0f
+
+/* Disarmed-only. Disabled in a fresh process, preserving the legacy commander watchdog.
+ * LANDED/FAULT (and an interrupted LAND) require fc_init() before rearming. */
+bool fc_set_failsafe_enabled(bool enabled);
+fc_failsafe_state_t fc_failsafe_state(void);
+
 /* (Re)initialize estimator, controller and mixer. Starts disarmed and calibrating. */
 void fc_init(void);
 
@@ -65,6 +96,8 @@ uint32_t fc_rate_hz(void);
 /*
  * Arming: returns false (and stays disarmed) unless calibrated, roughly level, not tumbled and not
  * emergency-stopped. Disarming always succeeds.
+ * Safe mode additionally requires fresh position/ToF. Its first command may arrive up to 500 ms
+ * after arming; until then motor output remains zero. A stale ground command disarms, never lands.
  */
 bool fc_arm(bool armed);
 bool fc_is_armed(void);
@@ -82,7 +115,11 @@ void fc_set_position_setpoint(float x, float y, float z, float yaw_deg);
 void fc_set_trajectory_setpoint(float x, float y, float z, float vx, float vy, float vz,
                                 float ax, float ay, float az, float yaw_deg);
 
-/* External measurements, queued and fused on the next fc_step (like the estimator queues). */
+/* External measurements, queued and fused on the next fc_step (like the estimator queues).
+ * Only accepted, finite plausible position/ToF packets refresh supervisor receipt freshness.
+ * Safety-mode ToF accepts ground distance zero through 4 m, with estimated cosine >= 0.5.
+ * Disabled mode preserves legacy enqueueing; unqualified packets never refresh safety evidence.
+ * Fresh receipt cannot detect a frozen/replayed sensor or prove estimator accuracy. */
 bool fc_push_position(float x, float y, float z, float std_dev);
 bool fc_push_tof(float distance_m, float std_dev);
 bool fc_push_flow(float dpixel_x, float dpixel_y, float dt, float std_dev);

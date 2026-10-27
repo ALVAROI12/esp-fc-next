@@ -7,6 +7,7 @@ make sim-setup   # create sim/.venv and install requirements
 make sim-test    # model consistency tests
 make g1          # gate G1 report -> sim/reports/g1/README.md
 make vibration   # Task 1.6b vibration/notch report -> sim/reports/vibration/README.md
+make failsafe    # opt-in latched hold/landing evidence -> sim/reports/failsafe/README.md
 make viewer      # interactive G1 studies + C SITL figure-8, square, flow-drift and vibration replays
 ```
 
@@ -113,6 +114,39 @@ dropout and recovery. The viewer's vibration trace is recorded at 4 kHz rather t
 
 Real frames can have structural resonances below the modeled motor lines, and real vibration must be
 measured. This work does not validate the P4 runtime, RPM sensing, or hardware flight.
+
+## Opt-in latched hold-and-land
+
+`SitlDrone(..., safe_landing=True)` enables the new C supervisor and adds independent local ToF
+to the camera-tracked model. It is disabled by default, not activated in the production P4 image.
+`link_up`, `tracking_up` and `height_up` gate command packets, camera position and range separately.
+
+- At 500 ms command silence, capture the **current estimated pose**, remove trajectory feedforward,
+  hold for 1.5 s, then land. A recovered command may cancel HOLD but never LAND.
+- At 300 ms without camera input, start landing even if commands still arrive. Disable stale XY
+  control and level; use independent local range for height. Do not claim bounded XY drift.
+- LAND remains latched through a height/vertical-speed touchdown dwell; terminal LANDED disarms
+  and blocks automatic rearm. Emergency stop and tumble protections always override.
+- Missing all reliable height or a timed-out landing is a separate FAULT/motor stop, **not** successful
+  controlled landing. The resulting fall is a known failure path, not a safety guarantee.
+
+`make failsafe` exports measured height, sampled approach speed, state transitions, disarm height
+and XY excursion for hover/moving loss and recovery scenarios at both loop rates. The interactive
+viewer adds `?scenario=failsafe` with height/speed/state/drift charts. Tests verify actual motor output
+and truth positions through touchdown/recovery, not only state flags.
+
+In the nominal seed-9 report, controlled cases land 5.24-7.05 s after loss, reach about 0.263 m/s maximum
+downward speed, approach ground at a sampled 0.093-0.102 m/s, and disarm at ground. Command recovery
+during LAND does not restart flight. **Moving camera loss still drifts about 1.7-2.0 m horizontally**
+(the larger excursion is after a restored/jumped camera reference);
+combined loss drifts about 1.3 m. These are not collision-safe swarm results. Losing both camera
+height and ToF triggers motor stop near 1 m and a fall, explicitly reported as FAULT rather than landing.
+
+The simulated ToF assumes a flat ground plane and Gaussian noise, without calibrated offset or
+occlusion; approach speed is the last 100 Hz pre-contact sample (physics clamps vertical velocity
+at ground). Freshness is packet receipt age, not replay/freeze detection, acquisition age or estimator
+quality. All thresholds and touchdown heuristics need physical measurements before hardware activation.
+No collision-safe flight or improvement to FLOW-01 is claimed. See `docs/fc_core.md` and the report.
 
 ## Open accuracy issue: FLOW-01
 

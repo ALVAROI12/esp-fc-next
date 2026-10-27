@@ -69,6 +69,14 @@ class Log:
     gyro_notch: list = field(default_factory=list)
     gyro_filtered: list = field(default_factory=list)
     roll_rate: list = field(default_factory=list)  # ground-truth body roll rate (deg/s)
+    safety: list = field(default_factory=list)  # optional opt-in supervisor state
+    safety_reason: list = field(default_factory=list)
+    hold_position: list = field(default_factory=list)  # captured safety reference, not mission target
+    velocity: list = field(default_factory=list)  # true world velocity for landing evidence
+    safety_height: list = field(default_factory=list)  # supervisor's selected landing height
+    position_fresh: list = field(default_factory=list)
+    tof_fresh: list = field(default_factory=list)
+    attitude_target: list = field(default_factory=list)  # actual controller roll/pitch targets
 
     def arrays(self) -> dict[str, np.ndarray]:
         return {k: np.asarray(v) for k, v in self.__dict__.items()}
@@ -89,6 +97,7 @@ class SitlDrone:
         vibration: VibrationSpec | None = None,
         rpm_notch: bool = False,
         rpm_error: float = 0.02,
+        safe_landing: bool = False,
     ):
         if not math.isfinite(rpm_error) or abs(rpm_error) > 0.5:
             raise ValueError("RPM error must be finite and within +/-50 percent")
@@ -97,6 +106,8 @@ class SitlDrone:
         self.fw = FlightFirmware(PROFILE_VARIANT[profile])
         self.fw.apply_profile(profile)
         self.fw.set_rpm_notch(rpm_notch)
+        self.safe_landing = safe_landing
+        self.fw.set_failsafe_enabled(safe_landing)
         if profile == "stock" or thrust_base is not None:
             # The stock firmware has no airframe profile: at least give it this airframe's hover throttle.
             self.fw.set_param("posCtlPid.thrustBase",
@@ -121,12 +132,18 @@ class SitlDrone:
         # MocapModel counts latency in calls, and it is sampled every `every["mocap"]` ticks.
         self.mocap = MocapModel(sensors.mocap, self.rng, self.every["mocap"] * self.dt) if positioning == "mocap" else None
         self.flow = FlowModel(sensors.flow, self.rng) if positioning == "flow" else None
-        self.tof = TofModel(sensors.tof, self.rng) if positioning == "flow" else None
+        # In safety runs local range is independent of camera/IMU RNG and available with mocap.
+        # Legacy flow runs preserve their original sensor stream exactly.
+        self.tof = (TofModel(sensors.tof, np.random.default_rng(seed + 2017)) if safe_landing
+                    else TofModel(sensors.tof, self.rng) if positioning == "flow" else None)
         self.command = np.zeros(4)
         self.tick = 0
         self.trajectory: Trajectory | None = None
         self.target: tuple[float, float, float, float] | None = None  # last sent x, y, z, yaw
         self.link_up = True
+        self.tracking_up = True  # external position only; independent of command radio
+        self.tracking_offset = np.zeros(3)  # injected camera reference jump for recovery tests
+        self.height_up = True  # onboard downward range only
         self.log = Log()
 
     @property
@@ -152,22 +169,32 @@ class SitlDrone:
             if self.time > timeout:
                 raise RuntimeError("firmware did not finish calibration")
             self.step(record=False)
-        if not self.fw.arm(True):
-            raise RuntimeError("firmware refused to arm")
+        if self.fw.arm(True):
+            return
+        if self.safe_landing:
+            # Calibration does not drain estimator queues until READY. Those early
+            # packets must not count as fresh arming evidence; await new samples.
+            for _ in range(round(0.3 * self.rate)):
+                self.step(record=False)
+                if self.fw.arm(True):
+                    return
+        raise RuntimeError("firmware refused to arm")
 
     # ---- simulation ----
     def _sensors(self) -> None:
         s = self.quad.state
         rot = quat_to_rot(s.quat)
         if self.mocap and self.tick % self.every["mocap"] == 0:
-            self.fw.push_position(*self.mocap.sample(s.pos), MOCAP_STD_REPORTED)
+            measured = self.mocap.sample(s.pos)
+            if self.tracking_up:
+                self.fw.push_position(*(measured + self.tracking_offset), MOCAP_STD_REPORTED)
         if self.flow and self.tick % self.every["flow"] == 0:
             m = self.flow.sample(s.pos[2], s.vel, rot, s.omega, self.every["flow"] * self.dt)
             if m:
                 self.fw.push_flow(m[0], m[1], self.every["flow"] * self.dt, FLOW_STD_REPORTED)
         if self.tof and self.tick % self.every["tof"] == 0:
             d = self.tof.sample(s.pos[2], rot)
-            if d is not None and s.pos[2] > 0.03:
+            if self.height_up and d is not None and (self.safe_landing or s.pos[2] > 0.03):
                 self.fw.push_tof(d, TOF_STD_REPORTED)
 
     def step(self, record: bool = True) -> None:
@@ -203,6 +230,15 @@ class SitlDrone:
             self.log.est.append(est[0:3] + est[6:9])
             self.log.setpoint.append(list(self.target[:3]) if self.target else [math.nan] * 3)
             self.log.motors.append(self.command.copy())
+            if self.safe_landing:
+                self.log.safety.append(self.fw.failsafe_state)
+                self.log.safety_reason.append(self.fw.log("fcSafety.reason"))
+                self.log.velocity.append(st.vel.copy())
+                self.log.hold_position.append([self.fw.log(f"fcSafety.hold{a}") for a in "XYZ"])
+                self.log.safety_height.append(self.fw.log("fcSafety.height"))
+                self.log.position_fresh.append(self.fw.log("fcSafety.posFresh"))
+                self.log.tof_fresh.append(self.fw.log("fcSafety.tofFresh"))
+                self.log.attitude_target.append([self.fw.log(f"controller.{a}") for a in ("roll", "pitch")])
             if self.vibration:
                 self.log.gyro_raw.append(self.fw.log("fcGyro.rawX"))
                 self.log.gyro_notch.append(self.fw.log("fcGyro.notchX"))
