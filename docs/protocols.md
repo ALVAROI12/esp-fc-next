@@ -1,7 +1,7 @@
 # ESP-FC Next link protocols (Task 1.7)
 
 Code: `firmware/fc_core/include/fc_link.h`, `firmware/fc_core/src/fc_link.c` (portable C, built on host,
-P4 and C5). Tests: `tests/test_link.c`. Fuzzing: `make link-fuzz` (libFuzzer + ASan/UBSan).
+P4 and C5). Radio envelope: `fc_link_aead.h/.c` (section 3). Tests: `tests/test_link.c`. Fuzzing: `make link-fuzz` (libFuzzer + ASan/UBSan).
 
 All multi-byte fields are little-endian. No packed structs cross the wire; every field is written byte by byte.
 
@@ -57,8 +57,16 @@ broadcast, so the swarm status and swarm commands use an application-level envel
 - Receiver order: tag check first, then `fc_link_replay_accept` on that sender's window. A forged counter
   must never advance the window. The window accepts reordering up to 32 messages back and accepts each counter once.
 - Rekey before the 32-bit counter wraps (2.7 years at 50 Hz).
-- Status: format and replay window implemented and tested. AES-CCM sealing (mbedtls, bundled with ESP-IDF)
-  is drafted but not yet built or tested; host tests need an mbedtls source.
+- Code: `include/fc_link_aead.h`, `src/fc_link_aead.c`. The key is set once in `fc_link_aead_init`
+  (mbedtls allocates there); seal/open allocate nothing per packet. Replay windows (256 senders, ~3 KB) live
+  in the context.
+- Tests: `tests/test_link_aead.c` runs against the mbedtls that ESP-IDF 5.5 bundles (3.6.7). `make mbedtls-src`
+  copies it out of the pinned Docker image. The suite checks:
+  - RFC 3610 vector #1, which uses the same 13-byte nonce / 8-byte tag;
+  - the wire layout rebuilt byte-by-byte from this section;
+  - every single-bit flip, truncation, wrong key/network, replay, size limits.
+  The C5 firmware builds it against IDF's `mbedtls` component, and a boot self-check runs seal/open/replay.
+  That self-check has not been run on a board.
 
 ## 4. Not covered yet
 

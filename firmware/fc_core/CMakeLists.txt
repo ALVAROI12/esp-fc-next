@@ -118,6 +118,8 @@ endif()
 
 # The SITL turns this off so its configure step needs no network (Unity is fetched from GitHub).
 option(FC_BUILD_TESTS "Build the Unity test suites" ON)
+# mbedtls source for the AES-CCM envelope test; `make mbedtls-src` copies the one bundled with ESP-IDF.
+set(FC_MBEDTLS_DIR "" CACHE PATH "mbedtls source tree; enables test_link_aead")
 if(FC_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)

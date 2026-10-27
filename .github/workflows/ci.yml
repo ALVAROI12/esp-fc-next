@@ -11,9 +11,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: mbedtls from the pinned ESP-IDF image (AES-CCM envelope test)
+        run: |
+          mkdir -p build
+          docker run --rm -v "$PWD/build":/out espressif/idf:release-v5.5 \
+            bash -c 'cp -r "$IDF_PATH/components/mbedtls/mbedtls" /out/mbedtls && chown -R '"$(id -u):$(id -g)"' /out/mbedtls'
       - name: Build
         run: |
-          cmake -S firmware/fc_core -B build/fc_core -DFC_SANITIZE=ON -DCMAKE_C_COMPILER=clang
+          cmake -S firmware/fc_core -B build/fc_core -DFC_SANITIZE=ON -DCMAKE_C_COMPILER=clang \
+            -DFC_MBEDTLS_DIR="$PWD/build/mbedtls"
           cmake --build build/fc_core -j
       - name: Test
         run: ctest --test-dir build/fc_core --output-on-failure

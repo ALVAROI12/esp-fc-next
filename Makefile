@@ -17,13 +17,23 @@ COVERAGE_UNREACHABLE := --exclude '.*/controller_indi\.c' --exclude '.*/position
 COVERAGE_FILTERS := --include-internal-functions --filter 'firmware/flight/components/core/' \
 	--filter 'firmware/fc_core/src/' --filter 'firmware/fc_core/host/' $(COVERAGE_UNREACHABLE)
 
-.PHONY: all flight radio core-test core-coverage sim-setup sim-test g1 vibration failsafe flow-braking link-fuzz core-lint viewer pdf clean
+.PHONY: all flight radio core-test core-coverage sim-setup sim-test g1 vibration failsafe flow-braking link-fuzz core-lint mbedtls-src viewer pdf clean
 
 all: flight radio core-test
 
+# mbedtls for host tests of the AES-CCM link envelope: the exact copy bundled with the pinned ESP-IDF image,
+# so host tests and firmware use the same library version. No network fetch beyond the Docker image.
+IDF_IMAGE ?= espressif/idf:release-v5.5
+MBEDTLS_DIR := build/mbedtls
+$(MBEDTLS_DIR)/CMakeLists.txt:
+	mkdir -p build
+	docker run --rm -v "$(CURDIR)/build":/out $(IDF_IMAGE) \
+		bash -c 'rm -rf /out/mbedtls && cp -r "$$IDF_PATH/components/mbedtls/mbedtls" /out/mbedtls && chown -R $(shell id -u):$(shell id -g) /out/mbedtls'
+mbedtls-src: $(MBEDTLS_DIR)/CMakeLists.txt
+
 # Host build of the flight algorithms with ASan/UBSan, then run the tests.
-core-test:
-	cmake -S firmware/fc_core -B build/fc_core -G Ninja -DFC_SANITIZE=ON
+core-test: $(MBEDTLS_DIR)/CMakeLists.txt
+	cmake -S firmware/fc_core -B build/fc_core -G Ninja -DFC_SANITIZE=ON -DFC_MBEDTLS_DIR=$(CURDIR)/$(MBEDTLS_DIR)
 	cmake --build build/fc_core
 	ctest --test-dir build/fc_core --output-on-failure
 

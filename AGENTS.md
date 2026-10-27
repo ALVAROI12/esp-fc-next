@@ -16,7 +16,7 @@ Dual-chip ESP32-P4 (flight) + ESP32-C5 (radio) flight controller. Plan: `docs/ES
 
 ## Commands
 - `make flight` / `make radio` - firmware builds
-- `make core-test` - host build of fc_core with ASan/UBSan + Unity tests (sources used in place from the subtree; see `docs/fc_core.md`)
+- `make core-test` - host build of fc_core with ASan/UBSan + Unity tests (sources used in place from the subtree; see `docs/fc_core.md`); first run copies mbedtls out of the IDF image (`make mbedtls-src`, needs Docker)
 - `make core-lint` - cppcheck of fc_core (G3); `make link-fuzz` - libFuzzer on the link codec (docs/protocols.md)
 - `make core-coverage` - coverage summary + HTML in `build/coverage/`
 - `make sim-setup` / `make sim-test` - Python sim environment (uv, Python 3.12) and tests
