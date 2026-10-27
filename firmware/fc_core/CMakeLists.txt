@@ -73,6 +73,14 @@ set(FC_4K_DEFINITIONS RATE_MAIN_LOOP=4000 ATTITUDE_RATE=4000 FC_GYRO_LPF_HZ=150.
 
 set(ALL_SOURCES ${CF_SOURCES} ${DSP_SOURCES} ${FC_SOURCES} ${HOST_SOURCES})
 
+# G3: ESP-FC Next's own sources stay warning-free (subtree sources are upstream code and are not held to this).
+# -Werror only for Clang: CI's GCC coverage build is not checked locally.
+set(FC_WARNINGS -Wall -Wextra)
+if(CMAKE_C_COMPILER_ID MATCHES "Clang")
+    list(APPEND FC_WARNINGS -Werror)
+endif()
+set_source_files_properties(${FC_SOURCES} ${HOST_SOURCES} PROPERTIES COMPILE_OPTIONS "${FC_WARNINGS}")
+
 add_library(fc_core STATIC ${ALL_SOURCES})
 fc_configure(fc_core)
 add_library(fc_core_4k STATIC ${ALL_SOURCES})
