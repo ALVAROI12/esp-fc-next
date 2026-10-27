@@ -4,7 +4,7 @@
  * Replaces the FreeRTOS stabilizerTask + kalmanTask + sensor-task glue with a single
  * deterministic function so the same code runs in SITL (host) and on the ESP32-P4:
  *
- *   IMU sample -> gyro bias / accel scale calibration -> 2-pole LPF (as the sensor driver)
+ *   IMU sample -> gyro bias / accel scale calibration -> optional RPM notch -> 2-pole LPF
  *   -> Kalman estimator (synchronous port of estimator_kalman.c)
  *   -> setpoint + commander watchdog (as commander.c) -> controller -> supervisor -> mixer -> motors HAL
  *
@@ -51,6 +51,14 @@ typedef enum {
 
 /* (Re)initialize estimator, controller and mixer. Starts disarmed and calibrating. */
 void fc_init(void);
+
+/* Optional RPM gyro filter, configured while disarmed. Disabled by default. Q is in [1, 50]. */
+bool fc_set_rpm_notch(bool enabled, float q);
+/* Mechanical rpm from ESC telemetry (not eRPM); rejects nonfinite, negative or implausible packets.
+ * No throttle-derived estimate is substituted when telemetry is missing. */
+bool fc_push_rpm(const float rpm[4]);
+#define FC_RPM_TIMEOUT_MS 100
+#define FC_RPM_TUNE_MS 10
 
 uint32_t fc_rate_hz(void);
 

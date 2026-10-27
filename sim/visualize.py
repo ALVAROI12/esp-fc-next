@@ -21,6 +21,7 @@ from model import linear, robust
 from model.closed_loop import CascadedPidSim
 from model.firmware import AttitudeGains, PidGains, load_gains
 from model.params import DEFAULT_TIMING, PLANNED_TIMING, WHOOP_2IN, LoopTiming, Vehicle
+from model.vibration import VibrationSpec
 from sitl import SitlDrone
 from sitl.drone import figure8
 
@@ -156,6 +157,35 @@ def fly_tracking(label: str, color: str, profile: str, positioning: str = "mocap
     }
 
 
+def fly_vibration(label: str, color: str, notch: bool) -> dict:
+    """Hover with the assumed motor vibration; the charts isolate the gyro artifact from true motion."""
+    d = SitlDrone(seed=4, profile="whoop2_4k", vibration=VibrationSpec(), rpm_notch=notch)
+    d.calibrate_and_arm()
+    d.takeoff(1.0, 2.0)
+    d.run(4.0, record_hz=None)
+    d.run(3.0, record_hz=d.rate)
+    log = d.log.arrays()
+    t = log["t"] - log["t"][0]
+    artifact = log["gyro_raw"] - log["roll_rate"]
+    notched = log["gyro_notch"] - log["roll_rate"]
+    error = np.linalg.norm(log["pos"] - np.array([0.0, 0.0, 1.0]), axis=1)
+    worst = float(error.max())
+    return {
+        "label": label, "color": color,
+        "note": ("4 kHz SITL and gyro recording (dense trace; see spectrum report for frequencies), "
+                 "assumed 12 deg/s per-motor vibration, additive gyro artifact. "
+                 "Not a measured airframe; the notch does not change tracking in this model."),
+        "status": "ok" if worst < 0.05 and not d.fw.tumbled else "bad",
+        "badge": f"artifact {np.std(notched):.2f} deg/s",
+        "stats": (f"gyro artifact RMS {np.std(artifact):.2f} deg/s -> {np.std(notched):.2f} deg/s | "
+                  f"hover max {100 * worst:.2f} cm | asserts {d.fw.assert_count}"),
+        "lost": None,
+        "t": r(t), "pos": r(log["pos"]), "quat": r(log["quat"], 5), "motors": r(log["motors"]),
+        "series": {"artifact": r(artifact, 2), "notched": r(notched, 2), "error": r(error * 100, 2),
+                   "m1": r(log["motors"][:, 0] * 100, 2)},
+    }
+
+
 def scenarios() -> list[dict]:
     fw = load_gains()
     proposed, interim = load_designed_gains()
@@ -185,6 +215,7 @@ def scenarios() -> list[dict]:
     tracking = [fly_tracking("Reference settings", COLORS[0], "stock"),
                 fly_tracking("4 kHz + feedforward", COLORS[2], "whoop2_4k")]
     flow = [fly_tracking("Flow + height only", COLORS[0], "whoop2_interim", "flow")]
+    vibration = [fly_vibration("Notch off", COLORS[0], False), fly_vibration("RPM notch on", COLORS[2], True)]
 
     maneuver = "Roll doublet (+15 deg, -15 deg, level) with altitude hold, then a gust (roll torque kick) at t = 2.0 s."
     return [
@@ -207,6 +238,17 @@ def scenarios() -> list[dict]:
                     {"title": "Height (m) - dashed: target", "series": "z", "sp": "z_sp"},
                     {"title": "x (m) - dashed: initial hover position", "series": "x", "sp": "x_sp"}],
          "drones": flow},
+        {"id": "vibration", "title": "Task 1.6b: motor vibration + RPM notch",
+         "description": ("Both drones hover with the same seeded vibration disturbance, modeled as an additive gyro "
+                         "artifact (not body motion). Left: notch off. Right: four motors x 1x/2x mechanical rotation, "
+                         "Q=5, 100 Hz RPM telemetry with 10 ms latency. The notch removes the sensor artifact; the "
+                         "150 Hz gyro low-pass filter already keeps it out of the controller, so tracking is unchanged. "
+                         "Amplitudes are assumptions pending blackbox measurements."),
+         "duration": round(vibration[0]["t"][-1], 2), "spacing": 1.1, "camera": [0.6, 1.5, 2.4], "target_y": 0.9,
+         "charts": [{"title": "Roll-axis gyro artifact (deg/s)", "series": "artifact"},
+                    {"title": "After RPM notch (deg/s)", "series": "notched"},
+                    {"title": "Hover position error (cm)", "series": "error"}],
+         "drones": vibration},
         {"id": "sitl", "title": "G2 SITL: real firmware, takeoff + square",
          "description": ("The actual C flight firmware (fc_step: calibration, Kalman filter with 100 Hz mocap, position "
                          "controller, cascaded PID, mixer) flying the 6-DOF model with ICM-42688-P noise. Calibrates on "

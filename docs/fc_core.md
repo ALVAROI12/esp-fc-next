@@ -61,6 +61,7 @@ make core-coverage   # coverage summary + HTML report in build/coverage/index.ht
 | `test_kalman_core` | EKF: position, ToF height, flow velocity/gyro compensation, covariance symmetry/positivity, bounded dead reckoning |
 | `test_fc_step` / `_4k` | Calibration, immediate tilted/inverted arm refusal, tumble latch, watchdog feedforward clearing, reset and profile semantics |
 | `test_position_feedforward` / `_4k` | Stock-default compatibility and velocity/acceleration feedforward equations |
+| `test_rpm_notch` | Bypass, 1x/2x rejection, low-frequency preservation, retuning sweep, activation continuity, invalid/aliased RPM |
 
 Run `make core-coverage` for current measured coverage. INDI, Mellinger, the trajectory planner,
 and several optional Kalman measurements still lack comprehensive tests; the 80% whole-core
@@ -71,8 +72,8 @@ quality gate has not been met.
 `include/fc_step.h` / `src/fc_step.c` replace the Tier B `stabilizerTask` + `kalmanTask` + sensor-task glue
 with one deterministic call per tick (no RTOS calls, no allocation):
 
-1. Gyro-bias (1024 samples, restarts if moving) and accel-scale (200 samples) calibration, then the same
-   2-pole LPFs as the sensor driver (stock gyro 80 Hz, accel 30 Hz).
+1. Gyro-bias (1024 samples, restarts if moving) and accel-scale (200 samples) calibration, then an optional
+   RPM notch bank (Task 1.6b) and the same 2-pole LPFs as the sensor driver (stock gyro 80 Hz, accel 30 Hz).
 2. `src/fc_kalman.c`: synchronous port of `estimator_kalman.c` (100 Hz prediction, process noise and
    measurement updates every tick, supervisor reset) with fixed-size queues for position / ToF / flow.
 3. Commander watchdog copied from `commander.c` (level after 500 ms, cut motors after 2 s).
@@ -107,11 +108,55 @@ after the planned and interim profile checks pass. Profile application rejects t
 armed changes and attempts to restore `stock` after tuning. `fc_init()` clears dynamics while
 preserving the entire runtime configuration; it must not silently restore only some PID gains.
 
+## RPM notch bank (Task 1.6b)
+
+`include/fc_rpm_notch.h` / `src/fc_rpm_notch.c` implement a fixed-size bank of RBJ second-order
+notches: one per motor at the mechanical rotation frequency and one at its second harmonic, shared
+coefficients across the three gyro axes, separate histories. No allocation, no RTOS, no FFT.
+
+- Disabled in a fresh process. Like other runtime tuning, enable/Q persist across `fc_init()`;
+  histories and telemetry clear. `fc_set_rpm_notch(enabled, q)` is rejected while armed or with
+  Q outside [1, 50]; the default and the margin-checked setting are Q = 5.
+- `fc_push_rpm()` takes **mechanical** RPM from ESC telemetry, not electrical eRPM. A packet with any
+  non-finite, negative or implausible value is rejected as a whole and does not refresh the age.
+- Targets below 500 Hz or at/above 45 % of the sample rate are skipped to limit control-band phase
+  lag and avoid targeting aliased motor lines. At 1 kHz the upper cap is 450 Hz: every section
+  bypasses. A below-floor fundamental may still have an in-band second harmonic.
+- Coefficients retune at 100 Hz; history is preserved across retuning, and activation seeds history
+  with the current sample to avoid a DC step. After 100 ms without a valid packet the bank clears and
+  becomes an exact bypass.
+- `fcGyro.{rawX,notchX,filteredX,rpmFresh}` log the three gyro stages and telemetry freshness for
+  blackbox comparison; only the roll axis is exposed on the host.
+
+Measured in the 4 kHz SITL (`make vibration`): the modeled 1x/2x artifact drops from 3.8 to
+0.20 deg/s RMS at 12 deg/s assumed amplitude (11.5 to 0.50 at 36). High-frequency motor-command
+activity falls from 3.1 % to 1.9 % (zero-vibration baseline 1.9 %). Hover and figure-8 tracking are
+unchanged, because the existing 150 Hz gyro LPF already attenuates this band before the controller:
+the notch is justified here by sensor/actuator high-frequency stress, not by demonstrated position
+accuracy. At modeled hover RPM the bank adds about 0.9 deg of phase at 10 Hz (1.8 deg at 20 Hz);
+the worst of 32 uncertainty corners at hover is 47.5 deg PM / 7.2 dB GM. Review found that the
+initial 150 Hz floor failed away from hover (30.9 deg / 3.8 dB at a 150 Hz fundamental). The floor
+is now 500 Hz per section, and `make vibration` gates a sampled RPM sweep over 32 corners,
+including harmonic-only operation and activation/cap boundaries: worst sampled margins are
+46.2 deg PM / 6.9 dB GM. See `sim/reports/vibration/README.md` for exact frequencies.
+These fixed-coefficient Q=5 checks do not
+prove continuous/arbitrary independent RPM, other Q values, or hardware stability.
+
+Dropout regressions check actual `notchX == rawX` signal bypass as well as the freshness flag;
+SITL records position through loss and recovery. Reported RPM errors are constant positive
+common-mode scale biases, not per-motor random noise or jitter.
+
+All vibration amplitudes are assumptions. Real prop/motor imbalance, structural resonances (which
+this model does not represent), RPM calibration, pole-pair conversion and ESC telemetry latency need
+hardware blackbox measurements before flight.
+
 ## Next steps
 
 - **Hardware integration:** SPI IMU/DShot drivers, target profile hook and startup/task integration;
   measure 4 kHz deadlines on the P4 before activation (not proved by a host timing configuration).
-- **Task 1.6b:** motor vibration model and tested dynamic-notch/RPM filtering.
+- **Link-loss safety:** replace cut-motors with position hold and a controlled landing, including
+  camera-tracking loss; test the moving-trajectory case.
+- **Four-drone swarm simulation:** coordinated takeoff/landing, formation, collision and packet loss.
 - **FLOW-01:** flow/ToF alone does not meet absolute XY positioning accuracy. See `sim/README.md`.
 
 ## Patches applied to the ESP-Drone subtree

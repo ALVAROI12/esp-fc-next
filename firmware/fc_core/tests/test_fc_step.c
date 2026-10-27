@@ -250,6 +250,69 @@ static void test_params_and_logs_by_name(void)
     TEST_ASSERT_NOT_NULL(strstr(list, "pid_rate.roll_kp\n"));
 }
 
+static void test_rpm_timeout_bypasses_and_invalid_packets_do_not_refresh(void)
+{
+    TEST_ASSERT_TRUE(fc_set_rpm_notch(true, 5));
+    run(CALIBRATION_TICKS, ZERO_GYRO, LEVEL_ACC);
+
+    /* In-band target for this build. At 1 kHz the 0.45*fs cap (450 Hz) is below the 500 Hz
+     * floor, so the bank must stay an exact bypass there; only the 4 kHz build can filter. */
+#if FC_STEP_RATE_HZ >= 2000
+    const float target_hz = 600.0f; /* 36000 rpm, near the modeled hover speed */
+#else
+    const float target_hz = 300.0f; /* below the floor: exercises the bypass path only */
+#endif
+    const float rpm[4] = {target_hz * 60.0f, target_hz * 60.0f, target_hz * 60.0f, target_hz * 60.0f};
+    TEST_ASSERT_TRUE(fc_push_rpm(rpm));
+
+    /* Feed the target tone and compare the logged raw and notched gyro. */
+    double raw_ss = 0, notch_ss = 0;
+    for (int i = 0; i < 4000; i++) {
+        if (i % FC_MS_TO_TICKS(10) == 0) TEST_ASSERT_TRUE(fc_push_rpm(rpm));
+        float gyro[3] = {sinf(6.28318530718f * target_hz * i / FC_STEP_RATE_HZ), 0.0f, 0.0f};
+        run(1, gyro, LEVEL_ACC);
+        if (i >= 2000) {
+            double raw, notch;
+            fc_log_get("fcGyro", "rawX", &raw);
+            fc_log_get("fcGyro", "notchX", &notch);
+            raw_ss += raw * raw;
+            notch_ss += notch * notch;
+        }
+    }
+    TEST_ASSERT_TRUE(raw_ss > 1.0);
+#if FC_STEP_RATE_HZ >= 2000
+    TEST_ASSERT_TRUE(notch_ss < 0.05 * raw_ss); /* in-band tone is suppressed */
+#else
+    TEST_ASSERT_TRUE(notch_ss == raw_ss); /* exact bypass below the floor */
+#endif
+
+    double fresh;
+    fc_log_get("fcGyro", "rpmFresh", &fresh);
+    TEST_ASSERT_EQUAL(1, (int)fresh);
+
+    /* Stale telemetry must bypass the bank, not merely clear the flag. */
+    run(FC_MS_TO_TICKS(90), ZERO_GYRO, LEVEL_ACC);
+    const float corrupt[4] = {30000, NAN, -1, 1000};
+    TEST_ASSERT_FALSE(fc_push_rpm(corrupt));
+    run(FC_MS_TO_TICKS(11), ZERO_GYRO, LEVEL_ACC);
+    fc_log_get("fcGyro", "rpmFresh", &fresh);
+    TEST_ASSERT_EQUAL(0, (int)fresh);
+    for (int i = 0; i < 200; i++) {
+        float gyro[3] = {sinf(6.28318530718f * target_hz * i / FC_STEP_RATE_HZ), 0.0f, 0.0f};
+        run(1, gyro, LEVEL_ACC);
+        double raw, notch;
+        fc_log_get("fcGyro", "rawX", &raw);
+        fc_log_get("fcGyro", "notchX", &notch);
+        TEST_ASSERT_TRUE(raw == notch);
+    }
+
+    TEST_ASSERT_TRUE(fc_arm(true));
+    TEST_ASSERT_FALSE(fc_set_rpm_notch(false, 5)); /* configuration cannot change while armed */
+    fc_arm(false);
+    TEST_ASSERT_TRUE(fc_set_rpm_notch(false, 5));
+    TEST_ASSERT_FALSE(fc_set_rpm_notch(true, NAN));
+}
+
 /* Runs last: profiles change firmware parameters, which persist across fc_init() as on hardware. */
 static void test_board_profiles(void)
 {
@@ -301,6 +364,7 @@ int main(void)
     RUN_TEST(test_disarmed_commands_do_not_mark_estimator_flying);
     RUN_TEST(test_position_measurements_move_the_estimate);
     RUN_TEST(test_params_and_logs_by_name);
+    RUN_TEST(test_rpm_timeout_bypasses_and_invalid_packets_do_not_refresh);
     RUN_TEST(test_board_profiles);
     return UNITY_END();
 }

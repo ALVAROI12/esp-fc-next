@@ -129,7 +129,7 @@ def on_page(canvas, doc):
     canvas.saveState()
     canvas.setFont("Helvetica", 7.5)
     canvas.setFillColor(colors.grey)
-    canvas.drawString(0.75 * inch, 0.5 * inch, "ESP-FC Next - Project Plan v1.2")
+    canvas.drawString(0.75 * inch, 0.5 * inch, "ESP-FC Next - Project Plan v1.3")
     canvas.drawRightString(7.75 * inch, 0.5 * inch, f"Page {doc.page}")
     canvas.setStrokeColor(GRID)
     canvas.line(0.75 * inch, 0.62 * inch, 7.75 * inch, 0.62 * inch)
@@ -146,7 +146,7 @@ def build():
     s.append(table([
         ["Item", "Value"],
         ["Document", "Project plan, gap analysis and Phase 1 task list"],
-        ["Version / date", f"v1.2 - {date.today():%B %d, %Y}"],
+        ["Version / date", f"v1.3 - {date.today():%B %d, %Y}"],
         ["Base project", "Espressif ESP-Drone (GPL-3.0), master after PR #137 (ESP-IDF 5.5 / 6.1)"],
         ["First target", "Indoor swarm of 4 drones, USA"],
         ["Guiding rule", "Nothing is ordered or assembled until math, simulation and code/PCB review gates pass"],
@@ -193,7 +193,7 @@ def build():
     s.append(p("rtlopez/esp-fc (Betaflight-configurator-compatible ESP32 firmware), ArduPilot's experimental "
                "ESP32 port, Crazyflie upstream, and the open-source Low-Cost-Mocap project (ESP32 drone swarm "
                "with PS3 Eye cameras)."))
-    s.append(KeepTogether([p("Progress so far (v1.2)", H2), table([
+    s.append(KeepTogether([p("Progress so far (v1.3)", H2), table([
         ["Task", "Status", "Key result"],
         ["1.1 Repo + toolchain", "Done", "Private GitHub repo, Docker ESP-IDF 5.5 (Colima), CI builds P4 + S3 + C5 firmware"],
         ["1.2 Portable flight core", "Done", "18 Crazyflie algorithm files build on the PC unchanged (fc_core); HAL = existing driver interfaces"],
@@ -210,10 +210,23 @@ def build():
          "1/4 kHz host variants, 500 Hz EKF at 4 kHz, G1-generated board profiles, velocity/acceleration feedforward, "
          "exact sqrt on FPU builds, arming/tumble guards. Camera-tracked figure-8: about 4-5 cm maximum error in "
          "nominal simulation (10 cm target); flow-only absolute positioning FAILS (FLOW-01)."],
+        ["1.6b Motor vibration + RPM notch", "Simulation checks pass; hardware pending",
+         "Synthetic motor-vibration model (ASSUMED amplitudes); 4-motor 1x/2x RBJ notch bank, 100 Hz RPM telemetry, "
+         "100 ms bypass. 12 deg/s assumed artifact: 3.8 -> 0.20 deg/s RMS; motor activity >250 Hz 3.1% -> 1.9% "
+         "(baseline 1.9%). Hover/figure-8 tracking unchanged (LPF already attenuates the band). 500 Hz notch floor; "
+         "worst sampled RPM/32-corner margin 46.2 deg / 6.9 dB (hover only: 47.5 deg / 7.2 dB)."],
     ], [1.35, 0.8, 4.85]), p(
         "4 kHz is a host/SITL configuration, not a measured ESP32-P4 runtime. The production P4 image still uses "
         "the existing ESP-Drone task loop. Driver integration, CPU deadlines, Wi-Fi/camera contention and hardware "
-        "flight are unvalidated. Dynamic-notch/RPM filtering is deferred to Task 1.6b.", NOTE)]))
+        "flight are unvalidated. Dynamic-notch/RPM filtering was added in Task 1.6b as a simulation-only model.", NOTE), p(
+        "Task 1.6b is a synthetic stress model, not measured vibration. It adds a gyro artifact only, not frame "
+        "resonance or body torque. The notch reduces high-frequency gyro and motor-command activity but did not improve "
+        "position tracking in simulation; it does not fix FLOW-01 (flow-only absolute XY drift). Review found the initial "
+        "150 Hz notch floor failed off-hover margins; it is now 500 Hz per section. Q=5 sampled linear checks are not "
+        "an all-speed or hardware guarantee. RPM calibration, "
+        "pole-pair conversion, ESC telemetry latency and real vibration spectra require hardware blackbox data. "
+        "The 4 kHz runtime remains host/SITL only; the production P4 image still uses the existing ESP-Drone task "
+        "loop.", NOTE)]))
     s.append(PageBreak())
 
     # ---------------- 2. Gap analysis ----------------

@@ -14,7 +14,7 @@ endif
 COVERAGE_FILTERS := --include-internal-functions --filter 'firmware/flight/components/core/' \
 	--filter 'firmware/fc_core/src/' --filter 'firmware/fc_core/host/'
 
-.PHONY: all flight radio core-test core-coverage sim-setup sim-test g1 viewer pdf clean
+.PHONY: all flight radio core-test core-coverage sim-setup sim-test g1 vibration viewer pdf clean
 
 all: flight radio core-test
 
@@ -51,6 +51,10 @@ sim-test:
 # Gate G1 math-model report -> sim/reports/g1/README.md (non-zero exit if the gate fails).
 g1:
 	cd sim && .venv/bin/python g1_report.py
+
+# Task 1.6b vibration/notch report -> sim/reports/vibration/README.md (non-zero exit if a check fails).
+vibration:
+	cd sim && .venv/bin/python vibration_report.py
 
 # Interactive 3D replay of the G1 scenarios -> sim/reports/viewer/index.html (opens in the browser).
 viewer:

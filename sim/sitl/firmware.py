@@ -76,6 +76,7 @@ class FlightFirmware:
         self._gyro = (C.c_float * 3)()
         self._acc = (C.c_float * 3)()
         self._state = (C.c_float * 13)()
+        self._rpm = (C.c_float * 4)()
         self.variant = variant
         self.rate_hz = int(self._lib.fc_rate_hz())
         self.init()
@@ -97,6 +98,8 @@ class FlightFirmware:
             "fc_push_position": (b, [f, f, f, f]),
             "fc_push_tof": (b, [f, f]),
             "fc_push_flow": (b, [f, f, f, f]),
+            "fc_set_rpm_notch": (b, [b, f]),
+            "fc_push_rpm": (b, [C.POINTER(f)]),
             "fc_step": (None, [C.POINTER(f), C.POINTER(f)]),
             "fc_get_state_array": (None, [C.POINTER(f)]),
             "fc_host_motor_ratio": (u16, [u32]),
@@ -148,6 +151,16 @@ class FlightFirmware:
         return int(self._lib.fc_tick())
 
     # ---- inputs ----
+    def set_rpm_notch(self, enabled: bool, q: float = 5.0) -> None:
+        if not self._lib.fc_set_rpm_notch(enabled, q):
+            raise FirmwareError("RPM notch configuration rejected: disarm and use finite Q in [1, 50]")
+
+    def push_rpm(self, mechanical_rpm) -> bool:
+        if len(mechanical_rpm) != 4:
+            raise ValueError("four mechanical RPM measurements required")
+        self._rpm[:] = mechanical_rpm
+        return bool(self._lib.fc_push_rpm(self._rpm))
+
     def set_position_setpoint(self, x: float, y: float, z: float, yaw_deg: float = 0.0) -> None:
         self._lib.fc_set_position_setpoint(x, y, z, yaw_deg)
 

@@ -44,7 +44,7 @@ file(GLOB DSP_SOURCES
 )
 
 # ESP-FC Next portable loop (fc_step + synchronous Kalman) and host HAL.
-set(FC_SOURCES src/fc_step.c src/fc_kalman.c src/fc_profile.c)
+set(FC_SOURCES src/fc_step.c src/fc_kalman.c src/fc_profile.c src/fc_rpm_notch.c)
 set(HOST_SOURCES host/src/fc_host.c host/src/fc_vars.c)
 
 function(fc_configure target)

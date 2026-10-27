@@ -5,9 +5,10 @@ Derived from [Espressif ESP-Drone](https://github.com/espressif/esp-drone) (Craz
 
 The full plan, gap analysis and gates are in [`docs/ESP-FC-Next_Project_Plan.pdf`](docs/ESP-FC-Next_Project_Plan.pdf).
 
-**Current status:** 1/4 kHz host/SITL variants and trajectory feedforward are tested in simulation.
-The production P4 image still uses ESP-Drone's original task loop; the new runtime has not been
-activated or timing-validated on hardware. Flow-only absolute XY positioning remains an open failure.
+**Current status:** 1/4 kHz host/SITL variants, trajectory feedforward, and an optional RPM notch
+bank (Task 1.6b, synthetic vibration only) are tested in simulation. The production P4 image still
+uses ESP-Drone's original task loop; the new runtime has not been activated or timing-validated on
+hardware. Flow-only absolute XY positioning remains an open failure.
 
 ## Layout
 
@@ -41,6 +42,7 @@ make sim-setup
 | `tools/idf.sh firmware/flight -B build-esp32p4 menuconfig` | Any `idf.py` command inside the pinned container |
 | `make sim-test` | Run simulation and model tests |
 | `make g1` | Gate G1 math-model report ([`sim/reports/g1`](sim/reports/g1/README.md)) |
+| `make vibration` | Task 1.6b vibration/notch report ([`sim/reports/vibration`](sim/reports/vibration/README.md)) |
 | `make viewer` | Interactive 3D simulation replay with charts (opens in the browser) |
 | `make pdf` | Regenerate the project plan PDF |
 

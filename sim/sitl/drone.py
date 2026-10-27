@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from collections import deque
 import math
 from typing import Callable
 
@@ -11,6 +12,7 @@ import numpy as np
 from model.dynamics import Quadrotor, State, quat_to_euler, quat_to_rot
 from model.params import DEFAULT_SENSORS, WHOOP_2IN, Sensors, Vehicle
 from model.sensors import FlowModel, ImuModel, MocapModel, TofModel
+from model.vibration import MotorVibration, VibrationSpec
 
 from .firmware import PROFILE_VARIANT, FlightFirmware
 
@@ -63,6 +65,10 @@ class Log:
     est: list = field(default_factory=list)  # firmware estimate x y z roll pitch yaw
     setpoint: list = field(default_factory=list)  # x y z
     motors: list = field(default_factory=list)  # normalized 0..1
+    gyro_raw: list = field(default_factory=list)  # roll-axis gyro (deg/s), only recorded in vibration runs
+    gyro_notch: list = field(default_factory=list)
+    gyro_filtered: list = field(default_factory=list)
+    roll_rate: list = field(default_factory=list)  # ground-truth body roll rate (deg/s)
 
     def arrays(self) -> dict[str, np.ndarray]:
         return {k: np.asarray(v) for k, v in self.__dict__.items()}
@@ -80,11 +86,17 @@ class SitlDrone:
         profile: str = "stock",
         positioning: str = "mocap",
         thrust_base: float | None = None,
+        vibration: VibrationSpec | None = None,
+        rpm_notch: bool = False,
+        rpm_error: float = 0.02,
     ):
+        if not math.isfinite(rpm_error) or abs(rpm_error) > 0.5:
+            raise ValueError("RPM error must be finite and within +/-50 percent")
         self.vehicle = vehicle
         self.rng = np.random.default_rng(seed)
         self.fw = FlightFirmware(PROFILE_VARIANT[profile])
         self.fw.apply_profile(profile)
+        self.fw.set_rpm_notch(rpm_notch)
         if profile == "stock" or thrust_base is not None:
             # The stock firmware has no airframe profile: at least give it this airframe's hover throttle.
             self.fw.set_param("posCtlPid.thrustBase",
@@ -94,12 +106,17 @@ class SitlDrone:
         self.substeps = max(1, round(2000 / self.rate))  # physics step <= 0.5 ms
         self.quad = Quadrotor(vehicle, State(pos=np.array(start, dtype=float)), ground=True)
         self.imu = ImuModel(sensors.imu, self.rate, self.rng)
+        self.vibration = MotorVibration(vibration, seed=seed + 1009) if vibration else None
+        self.rpm_error = rpm_error
+        self.rpm_link_up = True
+        self._rpm_history = deque(maxlen=2)  # 100 Hz reports with one-report (10 ms) delivery latency
         self.positioning = positioning
         self.every = {
             "mocap": round(self.rate / sensors.mocap.rate_hz),
             "setpoint": round(self.rate / SETPOINT_RATE_HZ),
             "flow": round(self.rate / FLOW_RATE_HZ),
             "tof": round(self.rate / TOF_RATE_HZ),
+            "rpm": round(self.rate / 100),
         }
         # MocapModel counts latency in calls, and it is sampled every `every["mocap"]` ticks.
         self.mocap = MocapModel(sensors.mocap, self.rng, self.every["mocap"] * self.dt) if positioning == "mocap" else None
@@ -156,6 +173,13 @@ class SitlDrone:
     def step(self, record: bool = True) -> None:
         s = self.quad.state
         imu_gyro, imu_acc = self.imu.sample(s.omega, self.quad.specific_force_body(self.command))
+        if self.vibration:
+            imu_gyro += self.vibration.sample(s.rotor, self.dt)
+            if self.tick % self.every["rpm"] == 0:
+                self._rpm_history.append(self.vibration.rpm(s.rotor) * (1.0 + self.rpm_error))
+                if len(self._rpm_history) == 2 and self.rpm_link_up:
+                    if not self.fw.push_rpm(self._rpm_history[0]):
+                        raise RuntimeError("simulated RPM packet was rejected")
         self._sensors()
         if self.trajectory and self.tick % self.every["setpoint"] == 0:
             sp_pos, sp_vel, sp_acc, sp_yaw = self.trajectory(self.time)
@@ -179,6 +203,11 @@ class SitlDrone:
             self.log.est.append(est[0:3] + est[6:9])
             self.log.setpoint.append(list(self.target[:3]) if self.target else [math.nan] * 3)
             self.log.motors.append(self.command.copy())
+            if self.vibration:
+                self.log.gyro_raw.append(self.fw.log("fcGyro.rawX"))
+                self.log.gyro_notch.append(self.fw.log("fcGyro.notchX"))
+                self.log.gyro_filtered.append(self.fw.log("fcGyro.filteredX"))
+                self.log.roll_rate.append(math.degrees(st.omega[0]))
 
     def run(self, seconds: float, record_hz: float | None = 250.0) -> None:
         """Advance `seconds`; log at record_hz (None = no logging)."""

@@ -12,6 +12,7 @@
 #include "controller.h"
 #include "controller_pid.h"
 #include "fc_kalman.h"
+#include "fc_rpm_notch.h"
 #include "filter.h"
 #include "log.h"
 #include "param.h"
@@ -43,6 +44,11 @@ static struct {
     float accScale;
 
     lpf2pData gyroLpf[3], accLpf[3];
+    fc_rpm_notch_t rpmNotch;
+    float rpm[4], rawGyro[3], notchGyro[3];
+    uint32_t rpmTick, rpmTuneTick;
+    bool haveRpm;
+    uint8_t rpmActive;
 
     sensorData_t sensors;
     state_t state;
@@ -53,12 +59,15 @@ static struct {
     bool haveSetpoint;
 } fc;
 static bool controllerInitialized;
+static bool rpmNotchEnabled;
+static float rpmNotchQ = 5.0f;
 
 void fc_init(void)
 {
     memset(&fc, 0, sizeof(fc));
     fc.phase = FC_PHASE_CALIBRATING;
     fc.accScale = 1.0f;
+    fc_rpm_notch_init(&fc.rpmNotch, FC_STEP_RATE_HZ, rpmNotchQ);
     for (int i = 0; i < 3; i++) {
         lpf2pInit(&fc.gyroLpf[i], FC_STEP_RATE_HZ, FC_GYRO_LPF_HZ);
         lpf2pInit(&fc.accLpf[i], FC_STEP_RATE_HZ, FC_ACCEL_LPF_HZ);
@@ -75,6 +84,46 @@ void fc_init(void)
 }
 
 uint32_t fc_rate_hz(void) { return FC_STEP_RATE_HZ; }
+
+bool fc_set_rpm_notch(bool enabled, float q)
+{
+    if (fc.armed || !isfinite(q) || q < 1 || q > 50) return false;
+    rpmNotchEnabled = enabled;
+    rpmNotchQ = q;
+    fc_rpm_notch_init(&fc.rpmNotch, FC_STEP_RATE_HZ, q);
+    fc.haveRpm = false;
+    fc.rpmActive = 0;
+    return true;
+}
+
+bool fc_push_rpm(const float rpm[4])
+{
+    for (int m = 0; m < FC_RPM_MOTORS; m++) {
+        if (!isfinite(rpm[m]) || rpm[m] < 0 || rpm[m] > 200000.0f) return false;
+    }
+    memcpy(fc.rpm, rpm, sizeof(fc.rpm));
+    fc.rpmTick = fc.tick;
+    fc.haveRpm = true;
+    return true;
+}
+
+static void filter_gyro(const float gyro[3])
+{
+    for (int a = 0; a < 3; a++) fc.rawGyro[a] = fc.notchGyro[a] = gyro[a] - fc.gyroBias[a];
+    bool fresh = rpmNotchEnabled && fc.haveRpm &&
+                 (uint32_t)(fc.tick - fc.rpmTick) <= FC_MS_TO_TICKS(FC_RPM_TIMEOUT_MS);
+    if (!fresh) {
+        if (fc.rpmActive) fc_rpm_notch_clear(&fc.rpmNotch);
+        fc.rpmActive = 0;
+    } else {
+        if (!fc.rpmActive || (uint32_t)(fc.tick - fc.rpmTuneTick) >= FC_MS_TO_TICKS(FC_RPM_TUNE_MS)) {
+            fc_rpm_notch_update(&fc.rpmNotch, fc.rpm);
+            fc.rpmTuneTick = fc.tick;
+        }
+        fc.rpmActive = 1; /* fresh telemetry; individual out-of-band/stopped sections still bypass */
+        fc_rpm_notch_apply(&fc.rpmNotch, fc.notchGyro);
+    }
+}
 
 static float tilt_deg(void)
 {
@@ -238,8 +287,9 @@ void fc_step(const float gyro_dps[3], const float acc_g[3])
     if (fc.phase == FC_PHASE_CALIBRATING) {
         calibrate(gyro_dps, acc_g);
     }
+    filter_gyro(gyro_dps);
     for (int i = 0; i < 3; i++) {
-        fc.sensors.gyro.axis[i] = lpf2pApply(&fc.gyroLpf[i], gyro_dps[i] - fc.gyroBias[i]);
+        fc.sensors.gyro.axis[i] = lpf2pApply(&fc.gyroLpf[i], fc.notchGyro[i]);
         fc.sensors.acc.axis[i] = lpf2pApply(&fc.accLpf[i], acc_g[i] / fc.accScale);
     }
     fc.sensors.interruptTimestamp = usecTimestamp();
@@ -313,3 +363,10 @@ LOG_ADD(LOG_FLOAT, biasY, &fc.gyroBias[1])
 LOG_ADD(LOG_FLOAT, biasZ, &fc.gyroBias[2])
 LOG_ADD(LOG_FLOAT, accScale, &fc.accScale)
 LOG_GROUP_STOP(fcStep)
+
+LOG_GROUP_START(fcGyro)
+LOG_ADD(LOG_FLOAT, rawX, &fc.rawGyro[0])
+LOG_ADD(LOG_FLOAT, notchX, &fc.notchGyro[0])
+LOG_ADD(LOG_FLOAT, filteredX, &fc.sensors.gyro.x)
+LOG_ADD(LOG_UINT8, rpmFresh, &fc.rpmActive)
+LOG_GROUP_STOP(fcGyro)
