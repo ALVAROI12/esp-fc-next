@@ -17,6 +17,13 @@ jobs:
           cmake --build build/fc_core -j
       - name: Test
         run: ctest --test-dir build/fc_core --output-on-failure
+      - name: Static analysis (cppcheck)
+        run: sudo apt-get install -y cppcheck && make core-lint
+      - name: Link codec fuzz smoke (60 s)
+        run: |
+          cmake -S firmware/fc_core -B build/fuzz -DFC_FUZZ=ON -DCMAKE_C_COMPILER=clang
+          cmake --build build/fuzz --target fuzz_link
+          build/fuzz/fuzz_link -max_total_time=60
       - name: Coverage
         run: |
           pipx install gcovr

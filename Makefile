@@ -14,7 +14,7 @@ endif
 COVERAGE_FILTERS := --include-internal-functions --filter 'firmware/flight/components/core/' \
 	--filter 'firmware/fc_core/src/' --filter 'firmware/fc_core/host/'
 
-.PHONY: all flight radio core-test core-coverage sim-setup sim-test g1 vibration failsafe flow-braking link-fuzz viewer pdf clean
+.PHONY: all flight radio core-test core-coverage sim-setup sim-test g1 vibration failsafe flow-braking link-fuzz core-lint viewer pdf clean
 
 all: flight radio core-test
 
@@ -42,6 +42,17 @@ link-fuzz:
 	cmake --build build/fuzz --target fuzz_link
 	mkdir -p build/fuzz/corpus
 	build/fuzz/fuzz_link -max_total_time=$(FUZZ_SECONDS) -print_final_stats=1 build/fuzz/corpus
+
+# G3 static analysis of ESP-FC Next sources (non-zero exit on any finding).
+CF := firmware/flight/components
+core-lint:
+	cppcheck --quiet --error-exitcode=1 --enable=warning,portability,performance --inline-suppr \
+		--suppress=missingInclude --suppress=missingIncludeSystem \
+		-DUNIT_TEST_MODE -DFC_HOST_BUILD -DRATE_MAIN_LOOP=1000 \
+		-I firmware/fc_core/include -I firmware/fc_core/src -I firmware/fc_core/host/include \
+		-I $(CF)/core/crazyflie/modules/interface -I $(CF)/core/crazyflie/utils/interface \
+		-I $(CF)/core/crazyflie/hal/interface -I $(CF)/config/include \
+		firmware/fc_core/src firmware/fc_core/host/src
 
 flight:
 	$(call idf_build,firmware/flight,$(FLIGHT_TARGET))
