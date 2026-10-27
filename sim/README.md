@@ -6,7 +6,13 @@ Python environment for gate G1 (math model) and G2 (software-in-the-loop), Pytho
 make sim-setup   # create sim/.venv and install requirements
 make sim-test    # model consistency tests
 make g1          # gate G1 report -> sim/reports/g1/README.md
+make viewer      # interactive 3D replay of the G1 scenarios in the browser
 ```
+
+The viewer (`visualize.py` + `viewer/viewer.html`, three.js) replays the nonlinear closed-loop simulation:
+nominal airframe, worst-case airframe, and a Monte Carlo fleet, each flying a roll doublet and a gust, with
+synced roll / roll-rate / motor charts, slow motion and scrubbing. `?scenario=worst&t=2.3` in the URL opens a
+scenario paused at a time.
 
 ## Math model (`model/`, Task 1.4)
 

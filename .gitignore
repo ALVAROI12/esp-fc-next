@@ -17,3 +17,6 @@ firmware/*/dependencies.lock
 
 # Host builds
 build/
+
+# Generated simulation viewer (make viewer)
+sim/reports/viewer/

@@ -37,6 +37,7 @@ make sim-setup
 | `tools/idf.sh firmware/flight -B build-esp32p4 menuconfig` | Any `idf.py` command inside the pinned container |
 | `make sim-test` | Run simulation and model tests |
 | `make g1` | Gate G1 math-model report ([`sim/reports/g1`](sim/reports/g1/README.md)) |
+| `make viewer` | Interactive 3D simulation replay with charts (opens in the browser) |
 | `make pdf` | Regenerate the project plan PDF |
 
 ## Pulling upstream ESP-Drone changes

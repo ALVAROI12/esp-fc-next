@@ -79,6 +79,9 @@ class Trace:
     rate_deg: np.ndarray  # (N, 3) true body rates
     command: np.ndarray  # (N, 4) normalized motor commands
     pos: np.ndarray  # (N, 3)
+    quat: np.ndarray | None = None  # (N, 4) w, x, y, z
+    roll_sp: np.ndarray | None = None  # (N,) deg
+    lost_control_at: float | None = None  # time attitude exceeded 90 deg or went non-finite
 
 
 class CascadedPidSim:
@@ -106,13 +109,31 @@ class CascadedPidSim:
         self.command = np.full(4, hover)
         self.thrust_ratio = hover * RATIO_FULL_SCALE
 
-    def run(self, duration: float, roll_sp_deg=lambda t: 0.0, pitch_sp_deg=lambda t: 0.0, yaw_rate_sp=lambda t: 0.0) -> Trace:
+    def _altitude_thrust_ratio(self, z_sp: float) -> float:
+        """Simple PD altitude hold with tilt compensation (visualization aid, not the firmware's
+        position controller): returns the per-motor ratio producing the desired total thrust."""
+        s = self.quad.state
+        accel = 25.0 * (z_sp - s.pos[2]) - 10.0 * s.vel[2]
+        cos_tilt = max(0.5, float(1 - 2 * (s.quat[1] ** 2 + s.quat[2] ** 2)))
+        thrust = self.v.mass * (9.81 + accel) / cos_tilt
+        u = math.sqrt(max(0.0, thrust) / (4.0 * self.v.thrust_max))
+        return min(1.0, u) * RATIO_FULL_SCALE
+
+    def run(
+        self, duration: float, roll_sp_deg=lambda t: 0.0, pitch_sp_deg=lambda t: 0.0, yaw_rate_sp=lambda t: 0.0,
+        torque_disturbance=None, altitude_hold: float | None = None,
+    ) -> Trace:
+        """torque_disturbance(t) -> body torque (N m, 3-vector); altitude_hold: target height (m) or None."""
         n = int(duration / self.sensor_dt)
-        log_t, log_e, log_w, log_u, log_p = [], [], [], [], []
+        log_t, log_e, log_w, log_u, log_p, log_q, log_sp = [], [], [], [], [], [], []
+        lost_at = None
         gyro_f = np.zeros(3)
+        inertia_inv = np.array([1 / self.v.ixx, 1 / self.v.iyy, 1 / self.v.izz])
         for tick in range(n):
             t = tick * self.sensor_dt
             s = self.quad.state
+            if altitude_hold is not None and tick % self.ticks_per_rate == 0:
+                self.thrust_ratio = self._altitude_thrust_ratio(altitude_hold)
             omega_deg = np.degrees(s.omega)
             if self.imu:
                 gyro, _ = self.imu.sample(s.omega, np.zeros(3))
@@ -133,15 +154,25 @@ class CascadedPidSim:
             if len(self.pending) > self.timing.compute_delay_samples * self.ticks_per_rate:
                 self.command = self.pending.popleft()
 
+            disturbance = None
+            if torque_disturbance is not None:
+                disturbance = np.concatenate([np.zeros(3), np.asarray(torque_disturbance(t)) * inertia_inv])
             for _ in range(self.substeps):
-                self.quad.step(self.command, self.sensor_dt / self.substeps)
+                self.quad.step(self.command, self.sensor_dt / self.substeps, disturbance)
 
+            euler = [math.degrees(a) for a in quat_to_euler(self.quad.state.quat)]
             log_t.append(t)
-            log_e.append([math.degrees(a) for a in quat_to_euler(self.quad.state.quat)])
+            log_e.append(euler)
             log_w.append(np.degrees(self.quad.state.omega))
             log_u.append(self.command.copy())
             log_p.append(self.quad.state.pos.copy())
-        return Trace(np.array(log_t), np.array(log_e), np.array(log_w), np.array(log_u), np.array(log_p))
+            log_q.append(self.quad.state.quat.copy())
+            log_sp.append(roll_sp_deg(t))
+            if not np.all(np.isfinite(self.quad.state.as_vector())) or max(abs(euler[0]), abs(euler[1])) > 90.0:
+                lost_at = t
+                break
+        return Trace(np.array(log_t), np.array(log_e), np.array(log_w), np.array(log_u), np.array(log_p),
+                     np.array(log_q), np.array(log_sp), lost_at)
 
 
 def step_overshoot_pct(t: np.ndarray, y: np.ndarray, target: float, t_step: float) -> float:

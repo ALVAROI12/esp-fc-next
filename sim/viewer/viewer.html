@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESP-FC Next - simulation replay</title>
+<style>
+  :root {
+    --bg: #0f1419; --panel: #161d24; --line: #263241; --text: #d7dee6; --muted: #8796a8; --accent: #29b6f6;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  #app { display: grid; grid-template-columns: minmax(0, 1fr) 440px; grid-template-rows: auto minmax(0, 1fr) auto; height: 100%; }
+  header { grid-column: 1 / 3; display: flex; align-items: center; gap: 16px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .2px; }
+  header .sub { color: var(--muted); }
+  #view { position: relative; min-height: 0; }
+  #view canvas { display: block; }
+  .label { color: #fff; font-size: 11px; padding: 2px 6px; border-radius: 4px; background: rgba(0,0,0,.55);
+    border-left: 3px solid; white-space: nowrap; }
+  .label.lost { background: rgba(160,20,20,.85); }
+  #overlay { position: absolute; left: 12px; bottom: 10px; color: var(--muted); font-size: 11px; pointer-events: none; }
+  #clock { position: absolute; right: 14px; top: 10px; font: 600 22px ui-monospace, Menlo, monospace; color: #fff;
+    text-shadow: 0 1px 3px #000; pointer-events: none; }
+  aside { border-left: 1px solid var(--line); background: var(--panel); overflow-y: auto; padding: 12px 14px; min-height: 0; }
+  aside h2 { font-size: 13px; margin: 4px 0 6px; }
+  #desc { color: var(--muted); margin: 0 0 10px; }
+  .drone { display: grid; grid-template-columns: 12px 1fr auto; gap: 2px 8px; padding: 6px 0; border-top: 1px solid var(--line); }
+  .drone .sw { width: 12px; height: 12px; border-radius: 3px; margin-top: 3px; }
+  .drone .name { font-weight: 600; }
+  .drone .note { grid-column: 2 / 4; color: var(--muted); font-size: 12px; }
+  .drone .stats { grid-column: 2 / 4; font: 11px ui-monospace, Menlo, monospace; color: var(--text); }
+  .badge { font-size: 11px; padding: 1px 6px; border-radius: 9px; align-self: start; }
+  .ok { background: #1f3d2a; color: #8be0a4; } .bad { background: #4a1f1f; color: #ff9b9b; }
+  .chart { width: 100%; height: 128px; display: block; margin: 6px 0 2px; }
+  .ctitle { color: var(--muted); font-size: 11px; margin-top: 10px; }
+  footer { grid-column: 1 / 3; display: flex; align-items: center; gap: 12px; padding: 8px 16px; border-top: 1px solid var(--line); }
+  select, button { background: #1d2731; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; font: inherit; }
+  button { cursor: pointer; min-width: 72px; }
+  button:hover, select:hover { border-color: var(--accent); }
+  input[type=range] { flex: 1; accent-color: var(--accent); }
+  #time { font: 12px ui-monospace, Menlo, monospace; color: var(--muted); min-width: 92px; text-align: right; }
+  .help { color: var(--muted); font-size: 11px; }
+</style>
+<script type="importmap">
+{ "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>ESP-FC Next - simulation replay</h1>
+    <span class="sub">Nonlinear 6-DOF model + Python port of the firmware cascaded PID (gate G1)</span>
+  </header>
+  <div id="view">
+    <div id="clock">0.000 s</div>
+    <div id="overlay">Drag to orbit, scroll to zoom, right-drag to pan. Drones drawn 3x actual size.</div>
+  </div>
+  <aside>
+    <h2 id="title"></h2>
+    <p id="desc"></p>
+    <div id="drones"></div>
+    <div class="ctitle">Roll angle (deg) - dashed: setpoint</div>
+    <canvas class="chart" id="c-roll"></canvas>
+    <div class="ctitle">Roll rate (deg/s)</div>
+    <canvas class="chart" id="c-rate"></canvas>
+    <div class="ctitle">Motor M1 command (% of full scale)</div>
+    <canvas class="chart" id="c-motor"></canvas>
+  </aside>
+  <footer>
+    <select id="scenario"></select>
+    <button id="play">Pause</button>
+    <select id="speed">
+      <option value="0.05">0.05x</option><option value="0.1">0.1x</option><option value="0.25" selected>0.25x</option>
+      <option value="0.5">0.5x</option><option value="1">1x (real time)</option>
+    </select>
+    <input id="scrub" type="range" min="0" max="1000" value="0">
+    <span id="time">0.000 s</span>
+    <span class="help">Space: play/pause, arrows: step</span>
+  </footer>
+</div>
+
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { CSS2DRenderer, CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
+
+const DATA = /*__SIM_DATA__*/null;
+const VIS_SCALE = 3;
+const $ = (id) => document.getElementById(id);
+
+// ---------- 3D scene ----------
+const view = $("view");
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.shadowMap.enabled = true;
+view.appendChild(renderer.domElement);
+const labels = new CSS2DRenderer();
+labels.domElement.style.position = "absolute";
+labels.domElement.style.top = "0";
+labels.domElement.style.pointerEvents = "none";
+view.appendChild(labels.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0f1419);
+scene.fog = new THREE.Fog(0x0f1419, 6, 16);
+const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 100);
+camera.position.set(0.3, 1.45, 2.3);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 1, 0.15);
+controls.enableDamping = true;
+
+scene.add(new THREE.HemisphereLight(0xcfe3ff, 0x1a2027, 1.1));
+const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+sun.position.set(2, 5, 3);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -4, right: 4, top: 4, bottom: -4 });
+scene.add(sun);
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.MeshStandardMaterial({ color: 0x151b21, roughness: 1 }));
+floor.rotation.x = -Math.PI / 2;
+floor.receiveShadow = true;
+scene.add(floor);
+const grid = new THREE.GridHelper(20, 40, 0x2c3a48, 0x1f2a35);
+grid.position.y = 0.001;
+scene.add(grid);
+
+function makeDrone(color) {
+  const g = new THREE.Group();
+  const s = VIS_SCALE;
+  const arm = 0.045 * s, duct = 0.022 * s;
+  const dark = new THREE.MeshStandardMaterial({ color: 0x2a2f36, metalness: .3, roughness: .6 });
+  const accent = new THREE.MeshStandardMaterial({ color, metalness: .2, roughness: .45 });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.038 * s, 0.012 * s, 0.026 * s), dark);
+  body.castShadow = true;
+  g.add(body);
+  const canopy = new THREE.Mesh(new THREE.BoxGeometry(0.02 * s, 0.008 * s, 0.018 * s), accent);
+  canopy.position.y = 0.009 * s;
+  g.add(canopy);
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.005 * s, 0.014 * s, 12), new THREE.MeshStandardMaterial({ color: 0xffffff }));
+  nose.rotation.z = -Math.PI / 2;
+  nose.position.set(0.026 * s, 0, 0);
+  g.add(nose);
+  const props = [];
+  // Motor layout in body frame (x fwd, y left): M1 FR, M2 BR, M3 BL, M4 FL -> three (x, y_up, -y_left)
+  const h = Math.SQRT1_2;
+  [[h, -h], [-h, -h], [-h, h], [h, h]].forEach(([bx, by], i) => {
+    const px = bx * arm, pz = -by * arm;
+    const a = new THREE.Mesh(new THREE.BoxGeometry(arm, 0.004 * s, 0.006 * s), dark);
+    a.position.set(px / 2, 0, pz / 2);
+    a.rotation.y = Math.atan2(-pz, px);
+    a.castShadow = true;
+    g.add(a);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(duct, 0.0022 * s, 8, 32), accent);
+    ring.rotation.x = Math.PI / 2;
+    ring.position.set(px, 0.002 * s, pz);
+    ring.castShadow = true;
+    g.add(ring);
+    const prop = new THREE.Mesh(new THREE.BoxGeometry(duct * 1.8, 0.0012 * s, 0.004 * s),
+      new THREE.MeshStandardMaterial({ color: 0xdfe6ee, transparent: true, opacity: 0.85 }));
+    prop.position.set(px, 0.004 * s, pz);
+    prop.userData.spin = i % 2 === 0 ? 1 : -1;
+    g.add(prop);
+    props.push(prop);
+  });
+  return { group: g, props };
+}
+
+// ---------- playback state ----------
+let scen = null, drones = [], simTime = 0, playing = true, lastFrame = performance.now(), endPause = 0;
+const playbackHz = () => 1 / (scen.drones[0].t[1] - scen.drones[0].t[0]);
+
+function clearScene() {
+  drones.forEach((d) => { scene.remove(d.root); scene.remove(d.trail); d.label.element.remove(); });
+  drones = [];
+}
+
+function loadScenario(id) {
+  clearScene();
+  scen = DATA.scenarios.find((s) => s.id === id);
+  const n = scen.drones.length;
+  const spacing = n > 3 ? 0.62 : 0.85;
+  scen.drones.forEach((d, i) => {
+    const offset = (i - (n - 1) / 2) * spacing;
+    const { group, props } = makeDrone(d.color);
+    const root = new THREE.Group();
+    root.add(group);
+    scene.add(root);
+    const el = document.createElement("div");
+    el.className = "label";
+    el.style.borderColor = d.color;
+    el.textContent = d.label;
+    const label = new CSS2DObject(el);
+    label.position.y = 0.11; // float above the drone (not rotated with it)
+    root.add(label);
+    const pts = new Float32Array(d.t.length * 3);
+    d.pos.forEach((p, k) => { pts[3 * k] = p[0] + offset; pts[3 * k + 1] = p[2]; pts[3 * k + 2] = -p[1]; });
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(pts, 3));
+    const trail = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: d.color, transparent: true, opacity: 0.7 }));
+    scene.add(trail);
+    drones.push({ data: d, root, group, props, label, el, trail, offset });
+  });
+  $("title").textContent = scen.title;
+  $("desc").textContent = scen.description;
+  $("drones").innerHTML = scen.drones.map((d) => {
+    const status = d.lost !== null ? `<span class="badge bad">lost control ${d.lost.toFixed(2)} s</span>`
+      : (!d.stable || d.shake > 20) ? `<span class="badge bad">oscillating</span>` : `<span class="badge ok">stable</span>`;
+    const margins = d.stable ? `PM ${d.pm} deg, GM ${d.gm} dB` : "linear model: UNSTABLE";
+    return `<div class="drone"><div class="sw" style="background:${d.color}"></div><div class="name">${d.label}</div>${status}
+      <div class="note">${d.note}</div><div class="stats">rate loop ${margins} | roll-rate std after gust ${d.shake} deg/s</div></div>`;
+  }).join("");
+  simTime = 0;
+  camera.position.set(0.3, 1.45, n > 3 ? 3.6 : 2.3);
+  controls.target.set(0, 1, 0.15);
+  drawCharts();
+  resize();
+}
+
+// ---------- charts ----------
+const charts = [
+  { id: "c-roll", key: "roll", sp: "rollsp", scale: 1 },
+  { id: "c-rate", key: "rate", scale: 1 },
+  { id: "c-motor", key: "motors", index: 0, scale: 100 },
+];
+const chartCache = new Map();
+
+function series(d, c) {
+  return c.index !== undefined ? d[c.key].map((m) => m[c.index] * c.scale) : d[c.key].map((v) => v * c.scale);
+}
+
+function drawCharts() {
+  charts.forEach((c) => {
+    const cv = $(c.id), dpr = window.devicePixelRatio || 1;
+    const w = cv.clientWidth, h = cv.clientHeight;
+    cv.width = w * dpr; cv.height = h * dpr;
+    const ctx = cv.getContext("2d");
+    ctx.scale(dpr, dpr);
+    const all = scen.drones.flatMap((d) => series(d, c)).filter(Number.isFinite);
+    let lo = Math.min(...all), hi = Math.max(...all);
+    if (c.sp) { lo = Math.min(lo, ...scen.drones[0][c.sp]); hi = Math.max(hi, ...scen.drones[0][c.sp]); }
+    const pad = (hi - lo) * 0.08 || 1; lo -= pad; hi += pad;
+    const L = 40, R = 6, T = 6, B = 16;
+    const x = (t) => L + (t / DATA.duration) * (w - L - R);
+    const y = (v) => T + (1 - (v - lo) / (hi - lo)) * (h - T - B);
+    ctx.fillStyle = "#11171d"; ctx.fillRect(0, 0, w, h);
+    ctx.strokeStyle = "#263241"; ctx.fillStyle = "#8796a8"; ctx.font = "10px ui-monospace, Menlo, monospace"; ctx.lineWidth = 1;
+    for (let k = 0; k <= 4; k++) {
+      const v = lo + (k / 4) * (hi - lo), yy = y(v);
+      ctx.beginPath(); ctx.moveTo(L, yy); ctx.lineTo(w - R, yy); ctx.stroke();
+      ctx.fillText(v.toFixed(Math.abs(hi - lo) < 10 ? 1 : 0), 2, yy + 3);
+    }
+    for (let t = 0; t <= DATA.duration + 1e-9; t += 0.5) ctx.fillText(t.toFixed(1), x(t) - 8, h - 3);
+    if (c.sp) {
+      const d = scen.drones[0];
+      ctx.setLineDash([5, 4]); ctx.strokeStyle = "#e6edf3"; ctx.beginPath();
+      d.t.forEach((t, k) => (k ? ctx.lineTo(x(t), y(d[c.sp][k])) : ctx.moveTo(x(t), y(d[c.sp][k]))));
+      ctx.stroke(); ctx.setLineDash([]);
+    }
+    scen.drones.forEach((d) => {
+      const s = series(d, c);
+      ctx.strokeStyle = d.color; ctx.lineWidth = 1.4; ctx.beginPath();
+      d.t.forEach((t, k) => (k ? ctx.lineTo(x(t), y(s[k])) : ctx.moveTo(x(t), y(s[k]))));
+      ctx.stroke();
+    });
+    chartCache.set(c.id, { image: ctx.getImageData(0, 0, cv.width, cv.height), x, ctx, h });
+  });
+}
+
+function drawCursor() {
+  charts.forEach((c) => {
+    const cc = chartCache.get(c.id);
+    if (!cc) return;
+    cc.ctx.putImageData(cc.image, 0, 0);
+    const xx = cc.x(simTime);
+    cc.ctx.strokeStyle = "rgba(255,255,255,.75)"; cc.ctx.lineWidth = 1;
+    cc.ctx.beginPath(); cc.ctx.moveTo(xx, 0); cc.ctx.lineTo(xx, cc.h); cc.ctx.stroke();
+  });
+}
+
+// ---------- frame update ----------
+function applyFrame() {
+  const k0 = Math.floor(simTime * playbackHz());
+  drones.forEach((dr) => {
+    const d = dr.data, k = Math.min(k0, d.t.length - 1);
+    const p = d.pos[k], q = d.quat[k];
+    dr.root.position.set(p[0] + dr.offset, p[2], -p[1]);
+    dr.group.quaternion.set(q[1], q[3], -q[2], q[0]); // sim (w,x,y,z), z-up -> three y-up
+    dr.trail.geometry.setDrawRange(0, k + 1);
+    const lost = d.lost !== null && k >= d.t.length - 1;
+    dr.el.classList.toggle("lost", lost);
+    dr.el.textContent = lost ? `${d.label}: LOST CONTROL` : d.label;
+    dr.props.forEach((pr, i) => {
+      // Visual spin scaled to playback speed so slow motion looks slow.
+      pr.rotation.y += pr.userData.spin * d.motors[k][i] * 0.9 * Number($("speed").value) * 6;
+    });
+  });
+  const tt = simTime.toFixed(3) + " s";
+  $("clock").textContent = tt;
+  $("time").textContent = tt + " / " + DATA.duration.toFixed(1);
+  $("scrub").value = String(Math.round((simTime / DATA.duration) * 1000));
+  drawCursor();
+}
+
+function tick(now) {
+  const dt = Math.min(0.1, (now - lastFrame) / 1000);
+  lastFrame = now;
+  if (playing) {
+    if (simTime >= DATA.duration) {
+      endPause += dt;
+      if (endPause > 1.2) { simTime = 0; endPause = 0; }
+    } else {
+      simTime = Math.min(DATA.duration, simTime + dt * Number($("speed").value));
+    }
+  }
+  applyFrame();
+  controls.update();
+  renderer.render(scene, camera);
+  labels.render(scene, camera);
+  requestAnimationFrame(tick);
+}
+
+function resize() {
+  const w = view.clientWidth, h = view.clientHeight;
+  renderer.setSize(w, h);
+  labels.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  if (scen) drawCharts();
+}
+
+// ---------- controls ----------
+DATA.scenarios.forEach((s) => $("scenario").add(new Option(s.title, s.id)));
+$("scenario").onchange = (e) => loadScenario(e.target.value);
+$("play").onclick = () => { playing = !playing; $("play").textContent = playing ? "Pause" : "Play"; };
+$("scrub").oninput = (e) => { simTime = (Number(e.target.value) / 1000) * DATA.duration; endPause = 0; };
+window.addEventListener("keydown", (e) => {
+  if (e.code === "Space") { e.preventDefault(); $("play").click(); }
+  if (e.code === "ArrowRight") simTime = Math.min(DATA.duration, simTime + 1 / playbackHz());
+  if (e.code === "ArrowLeft") simTime = Math.max(0, simTime - 1 / playbackHz());
+});
+window.addEventListener("resize", resize);
+const params = new URLSearchParams(location.search);
+loadScenario(params.get("scenario") || DATA.scenarios[0].id);
+$("scenario").value = scen.id;
+if (params.has("t")) { simTime = Number(params.get("t")); playing = false; $("play").textContent = "Play"; }
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>
