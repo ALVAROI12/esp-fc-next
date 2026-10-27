@@ -32,6 +32,7 @@ jobs:
           ctest --test-dir build/fc_core-cov
           gcovr -r . --include-internal-functions \
             --filter 'firmware/flight/components/core/' --filter 'firmware/fc_core/src/' --filter 'firmware/fc_core/host/' \
+            --exclude '.*/controller_indi\.c' --exclude '.*/position_controller_indi\.c' --exclude '.*/controller_mellinger\.c' \
             --markdown-summary "$GITHUB_STEP_SUMMARY" --print-summary build/fc_core-cov
 
   sim:

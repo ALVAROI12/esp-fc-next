@@ -11,8 +11,11 @@ GCOV ?= xcrun llvm-cov gcov
 else
 GCOV ?= gcov
 endif
+# Linked only for controller.c's table; fc_step always selects the PID controller.
+COVERAGE_UNREACHABLE := --exclude '.*/controller_indi\.c' --exclude '.*/position_controller_indi\.c' \
+	--exclude '.*/controller_mellinger\.c'
 COVERAGE_FILTERS := --include-internal-functions --filter 'firmware/flight/components/core/' \
-	--filter 'firmware/fc_core/src/' --filter 'firmware/fc_core/host/'
+	--filter 'firmware/fc_core/src/' --filter 'firmware/fc_core/host/' $(COVERAGE_UNREACHABLE)
 
 .PHONY: all flight radio core-test core-coverage sim-setup sim-test g1 vibration failsafe flow-braking link-fuzz core-lint viewer pdf clean
 

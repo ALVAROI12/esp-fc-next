@@ -253,6 +253,11 @@ proposed upstream.
 
 ## Findings logged for gate G3
 
+Coverage (`make core-coverage`) counts code reachable from `fc_step`: the INDI and Mellinger controllers are
+linked only for `controller.c`'s table (fc_step always selects PID) and are excluded; `planner.c`/`pptraj*.c`
+(high-level commander only) are no longer built on the host. 2026-10-27: 79.7% lines, 67.4% branches;
+the G3 target is > 80%.
+
 | Location | Finding | Impact |
 | --- | --- | --- |
 | `modules/src/sensfusion6.c` (`invSqrt`) | S2 retains the approximation because it has no FPU | Benchmark separately before promising accuracy/CPU budget on that chip |

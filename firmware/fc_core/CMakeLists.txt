@@ -29,9 +29,6 @@ set(CF_SOURCES
     ${CF}/modules/src/kalman_supervisor.c
     ${CF}/modules/src/outlierFilter.c
     ${CF}/modules/src/sensfusion6.c
-    ${CF}/modules/src/pptraj.c
-    ${CF}/modules/src/pptraj_compressed.c
-    ${CF}/modules/src/planner.c
     ${CF}/utils/src/filter.c
     ${CF}/utils/src/num.c
 )
