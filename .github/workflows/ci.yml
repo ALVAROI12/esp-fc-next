@@ -25,6 +25,8 @@ jobs:
         run: ctest --test-dir build/fc_core --output-on-failure
       - name: Static analysis (cppcheck)
         run: sudo apt-get install -y cppcheck && make core-lint
+      - name: Static analysis (clang-tidy)
+        run: sudo apt-get install -y clang-tidy && make -o core-test core-tidy CLANG_TIDY=clang-tidy
       - name: Link codec fuzz smoke (60 s)
         run: |
           cmake -S firmware/fc_core -B build/fuzz -DFC_FUZZ=ON -DCMAKE_C_COMPILER=clang

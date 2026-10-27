@@ -17,7 +17,7 @@ COVERAGE_UNREACHABLE := --exclude '.*/controller_indi\.c' --exclude '.*/position
 COVERAGE_FILTERS := --include-internal-functions --filter 'firmware/flight/components/core/' \
 	--filter 'firmware/fc_core/src/' --filter 'firmware/fc_core/host/' $(COVERAGE_UNREACHABLE)
 
-.PHONY: all flight radio core-test core-coverage sim-setup sim-test g1 vibration failsafe flow-braking link-fuzz core-lint mbedtls-src viewer pdf clean
+.PHONY: all flight radio core-test core-coverage sim-setup sim-test g1 vibration failsafe flow-braking swarm link-fuzz core-lint core-tidy mbedtls-src viewer pdf clean
 
 all: flight radio core-test
 
@@ -67,6 +67,20 @@ core-lint:
 		-I $(CF)/core/crazyflie/hal/interface -I $(CF)/config/include \
 		firmware/fc_core/src firmware/fc_core/host/src
 
+# G3 clang-tidy of ESP-FC Next sources: path-sensitive analyzer + bug-prone patterns, warnings are errors.
+# Excluded as noise for this code base: C11 Annex K *_s suggestions (absent in newlib), struct padding, and
+# style checks that fire on Crazyflie macros/headers (signed bitwise in LOG/PARAM, macro parens, reserved
+# include guards, int->float tick narrowing, small-offset widening).
+CLANG_TIDY ?= $(shell [ -x /opt/homebrew/opt/llvm/bin/clang-tidy ] && echo /opt/homebrew/opt/llvm/bin/clang-tidy || echo clang-tidy)
+TIDY_CHECKS := -*,clang-analyzer-*,-clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,\
+-clang-analyzer-optin.performance.Padding,bugprone-*,-bugprone-easily-swappable-parameters,\
+-bugprone-signed-bitwise,-bugprone-macro-parentheses,-bugprone-narrowing-conversions,\
+-bugprone-reserved-identifier,-bugprone-implicit-widening-of-multiplication-result
+core-tidy: core-test
+	$(CLANG_TIDY) -p build/fc_core --quiet --checks='$(TIDY_CHECKS)' --warnings-as-errors='*' \
+		--header-filter='firmware/fc_core/(include|src)/.*' \
+		firmware/fc_core/src/*.c firmware/fc_core/host/src/*.c
+
 flight:
 	$(call idf_build,firmware/flight,$(FLIGHT_TARGET))
 
@@ -95,6 +109,10 @@ failsafe:
 
 flow-braking:
 	cd sim && .venv/bin/python flow_braking_report.py
+
+# Task 1.8 four-drone swarm missions with injected faults -> sim/reports/swarm/README.md (non-zero exit on failure).
+swarm:
+	cd sim && .venv/bin/python swarm_report.py
 
 # Interactive 3D replay of the G1 scenarios -> sim/reports/viewer/index.html (opens in the browser).
 viewer:

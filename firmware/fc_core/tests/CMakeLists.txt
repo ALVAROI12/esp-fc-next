@@ -36,6 +36,7 @@ fc_core_test_4k(test_position_feedforward)
 fc_core_test(test_rpm_notch)
 fc_core_test(test_failsafe)
 fc_core_test(test_link)
+fc_core_test(test_vars)
 fc_core_test_4k(test_failsafe)
 
 # AES-CCM radio envelope against ESP-IDF's bundled mbedtls (same version the C5 firmware links).
