@@ -15,6 +15,10 @@ An **opt-in latched hold-and-land supervisor** now has command/camera-loss SITL 
 still allows substantial XY drift; losing all height sources causes a separate fault/motor stop,
 not guaranteed safe landing. It is not collision-safe or hardware-validated.
 
+With qualified local flow/range, emergency velocity braking reduces nominal camera-loss excursion
+from 1.71-1.72 m to **0.28-0.29 m** in SITL ([comparison](sim/reports/flow_braking/README.md)).
+Total-height-loss recovery remains open; this does not close the absolute-positioning requirement.
+
 ## Layout
 
 | Path | Contents |
@@ -49,6 +53,7 @@ make sim-setup
 | `make g1` | Gate G1 math-model report ([`sim/reports/g1`](sim/reports/g1/README.md)) |
 | `make vibration` | Task 1.6b vibration/notch report ([`sim/reports/vibration`](sim/reports/vibration/README.md)) |
 | `make failsafe` | Opt-in latched landing/fault evidence ([`sim/reports/failsafe`](sim/reports/failsafe/README.md)) |
+| `make flow-braking` | Camera-loss braking comparison and sampled stresses |
 | `make viewer` | Interactive 3D simulation replay with charts (opens in the browser) |
 | `make pdf` | Regenerate the project plan PDF |
 

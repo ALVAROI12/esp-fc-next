@@ -48,6 +48,11 @@ jobs:
         run: |
           .venv/bin/python vibration_report.py --no-plots --out "$RUNNER_TEMP/vibration"
           cat "$RUNNER_TEMP/vibration/README.md" >> "$GITHUB_STEP_SUMMARY"
+      - name: Camera-loss flow braking checks
+        working-directory: sim
+        run: |
+          .venv/bin/python flow_braking_report.py --no-plots --out "$RUNNER_TEMP/flow_braking"
+          cat "$RUNNER_TEMP/flow_braking/README.md" >> "$GITHUB_STEP_SUMMARY"
 
   firmware:
     name: ${{ matrix.project }} (${{ matrix.target }})

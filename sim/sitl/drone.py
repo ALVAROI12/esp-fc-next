@@ -77,6 +77,7 @@ class Log:
     position_fresh: list = field(default_factory=list)
     tof_fresh: list = field(default_factory=list)
     attitude_target: list = field(default_factory=list)  # actual controller roll/pitch targets
+    flow_braking: list = field(default_factory=list)
 
     def arrays(self) -> dict[str, np.ndarray]:
         return {k: np.asarray(v) for k, v in self.__dict__.items()}
@@ -98,6 +99,7 @@ class SitlDrone:
         rpm_notch: bool = False,
         rpm_error: float = 0.02,
         safe_landing: bool = False,
+        local_flow: bool = False,
     ):
         if not math.isfinite(rpm_error) or abs(rpm_error) > 0.5:
             raise ValueError("RPM error must be finite and within +/-50 percent")
@@ -131,7 +133,8 @@ class SitlDrone:
         }
         # MocapModel counts latency in calls, and it is sampled every `every["mocap"]` ticks.
         self.mocap = MocapModel(sensors.mocap, self.rng, self.every["mocap"] * self.dt) if positioning == "mocap" else None
-        self.flow = FlowModel(sensors.flow, self.rng) if positioning == "flow" else None
+        self.flow = (FlowModel(sensors.flow, np.random.default_rng(seed + 3019)) if local_flow
+                     else FlowModel(sensors.flow, self.rng) if positioning == "flow" else None)
         # In safety runs local range is independent of camera/IMU RNG and available with mocap.
         # Legacy flow runs preserve their original sensor stream exactly.
         self.tof = (TofModel(sensors.tof, np.random.default_rng(seed + 2017)) if safe_landing
@@ -144,6 +147,10 @@ class SitlDrone:
         self.tracking_up = True  # external position only; independent of command radio
         self.tracking_offset = np.zeros(3)  # injected camera reference jump for recovery tests
         self.height_up = True  # onboard downward range only
+        self.flow_up = True
+        self.flow_scale = 1.0  # injected calibration bias, not truth fed to control
+        self.flow_latency_s = 0.0
+        self._flow_history = deque()
         self.log = Log()
 
     @property
@@ -191,7 +198,13 @@ class SitlDrone:
         if self.flow and self.tick % self.every["flow"] == 0:
             m = self.flow.sample(s.pos[2], s.vel, rot, s.omega, self.every["flow"] * self.dt)
             if m:
-                self.fw.push_flow(m[0], m[1], self.every["flow"] * self.dt, FLOW_STD_REPORTED)
+                self._flow_history.append((self.time, m))
+            latest = None
+            while self._flow_history and self._flow_history[0][0] <= self.time - self.flow_latency_s + 1e-9:
+                latest = self._flow_history.popleft()[1]
+            if latest is not None and self.flow_up:
+                self.fw.push_flow(latest[0] * self.flow_scale, latest[1] * self.flow_scale,
+                                  self.every["flow"] * self.dt, FLOW_STD_REPORTED)
         if self.tof and self.tick % self.every["tof"] == 0:
             d = self.tof.sample(s.pos[2], rot)
             if self.height_up and d is not None and (self.safe_landing or s.pos[2] > 0.03):
@@ -239,6 +252,7 @@ class SitlDrone:
                 self.log.position_fresh.append(self.fw.log("fcSafety.posFresh"))
                 self.log.tof_fresh.append(self.fw.log("fcSafety.tofFresh"))
                 self.log.attitude_target.append([self.fw.log(f"controller.{a}") for a in ("roll", "pitch")])
+                self.log.flow_braking.append(self.fw.log("fcSafety.flowBrake"))
             if self.vibration:
                 self.log.gyro_raw.append(self.fw.log("fcGyro.rawX"))
                 self.log.gyro_notch.append(self.fw.log("fcGyro.notchX"))

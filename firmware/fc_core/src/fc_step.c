@@ -64,6 +64,9 @@ static struct {
     bool havePosition, haveTof, landXYDisabled, touchdownPending;
     uint32_t positionTick, tofTick, holdTick, landTick, touchdownTick, estimatorResets;
     float holdX, holdY, holdZ, holdYaw, tofHeight, height;
+    bool haveFlow, flowLanding;
+    uint32_t flowTick;
+    uint8_t flowFresh, flowBrake;
 } fc;
 static bool controllerInitialized;
 static bool rpmNotchEnabled;
@@ -100,6 +103,12 @@ static bool state_valid(void)
     float qnorm = 0;
     for (unsigned i = 9; i < 13; i++) qnorm += values[i] * values[i];
     return qnorm > 0.9f && qnorm < 1.1f;
+}
+
+static bool flow_fresh(void)
+{
+    return fc.haveFlow && tof_fresh() && fc.tofHeight >= FC_FAILSAFE_FLOW_MIN_HEIGHT_M &&
+           (uint32_t)(fc.tick - fc.flowTick) <= FC_MS_TO_TICKS(FC_FAILSAFE_FLOW_TIMEOUT_MS);
 }
 
 bool fc_set_failsafe_enabled(bool enabled)
@@ -263,6 +272,8 @@ void fc_set_trajectory_setpoint(float x, float y, float z, float vx, float vy, f
 
 bool fc_push_position(float x, float y, float z, float std_dev)
 {
+    /* Once braking in the local frame, never fuse a jumped camera frame during this landing. */
+    if (failsafeEnabled && fc.flowLanding && fc.safetyState == FC_FAILSAFE_LAND) return false;
     bool qualified = isfinite(x) && isfinite(y) && isfinite(z) &&
         fabsf(x) <= 100.0f && fabsf(y) <= 100.0f && fabsf(z) <= 100.0f &&
         isfinite(std_dev) && std_dev > 0 && std_dev <= 10.0f;
@@ -295,9 +306,15 @@ bool fc_push_tof(float distance_m, float std_dev)
 
 bool fc_push_flow(float dpixel_x, float dpixel_y, float dt, float std_dev)
 {
+    bool qualified = isfinite(dpixel_x) && isfinite(dpixel_y) && fabsf(dpixel_x) <= 100 && fabsf(dpixel_y) <= 100 &&
+        isfinite(dt) && dt >= 0.001f && dt <= 0.05f && isfinite(std_dev) && std_dev > 0 && std_dev <= 5 &&
+        tof_fresh() && fc.tofHeight >= FC_FAILSAFE_FLOW_MIN_HEIGHT_M;
+    if (failsafeEnabled && !qualified) return false;
     flowMeasurement_t m = {.timestamp = fc.tick, .dpixelx = dpixel_x, .dpixely = dpixel_y,
                            .stdDevX = std_dev, .stdDevY = std_dev, .dt = dt};
-    return fcKalmanPushFlow(&m);
+    if (!fcKalmanPushFlow(&m)) return false;
+    if (qualified) { fc.haveFlow = true; fc.flowTick = fc.tick; }
+    return true;
 }
 
 static void calibrate(const float gyro[3], const float acc[3])
@@ -383,6 +400,8 @@ static void apply_failsafe(const float gyro[3], const float acc[3])
 {
     fc.posFresh = position_fresh();
     fc.tofFresh = tof_fresh();
+    fc.flowFresh = flow_fresh();
+    fc.flowBrake = 0;
     if (fc.safetyState >= FC_FAILSAFE_LANDED) {
         fc.armed = false; /* Terminal latches cannot be bypassed by disabling this option. */
         memset(&fc.activeSetpoint, 0, sizeof(fc.activeSetpoint));
@@ -448,6 +467,12 @@ static void apply_failsafe(const float gyro[3], const float acc[3])
     if (fc.landXYDisabled) {
         fc.activeSetpoint.mode.x = fc.activeSetpoint.mode.y = modeDisable;
         fc.activeSetpoint.mode.roll = fc.activeSetpoint.mode.pitch = modeAbs;
+        if (fc.flowFresh) {
+            /* Zero world-frame velocity, not a stale absolute position or unaided dead reckoning. */
+            fc.activeSetpoint.mode.x = fc.activeSetpoint.mode.y = modeVelocity;
+            fc.flowBrake = 1;
+            fc.flowLanding = true;
+        }
     }
     if (!fc.tofFresh && !fc.posFresh) {
         safety_fault(FC_FAILSAFE_REASON_HEIGHT);
@@ -564,6 +589,8 @@ LOG_ADD(LOG_FLOAT, accScale, &fc.accScale)
 LOG_GROUP_STOP(fcStep)
 
 LOG_GROUP_START(fcSafety)
+LOG_ADD(LOG_UINT8, flowFresh, &fc.flowFresh)
+LOG_ADD(LOG_UINT8, flowBrake, &fc.flowBrake)
 LOG_ADD(LOG_UINT8, state, &fc.safetyState)
 LOG_ADD(LOG_UINT8, reason, &fc.safetyReason)
 LOG_ADD(LOG_UINT8, posFresh, &fc.posFresh)

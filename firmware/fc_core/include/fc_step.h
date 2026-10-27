@@ -74,6 +74,8 @@ typedef enum {
 #define FC_FAILSAFE_TOUCHDOWN_HEIGHT_M 0.04f
 #define FC_FAILSAFE_TOUCHDOWN_SPEED_MPS 0.15f
 #define FC_FAILSAFE_MAX_TOF_M 4.0f
+#define FC_FAILSAFE_FLOW_TIMEOUT_MS 100
+#define FC_FAILSAFE_FLOW_MIN_HEIGHT_M 0.12f
 
 /* Disarmed-only. Disabled in a fresh process, preserving the legacy commander watchdog.
  * LANDED/FAULT (and an interrupted LAND) require fc_init() before rearming. */

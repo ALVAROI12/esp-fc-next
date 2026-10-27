@@ -427,15 +427,41 @@ static void test_all_height_expiry_during_dwell_is_fault_not_touchdown(void)
     TEST_ASSERT_FALSE(motors_on());
 }
 
-static void test_invalid_estimator_output_is_fault(void)
+static void test_invalid_flow_is_rejected_without_poisoning_estimator(void)
 {
     hover();
-    /* Exercise state validation independently of the raw IMU guard. Flow is a separate legacy queue. */
-    TEST_ASSERT_TRUE(fc_push_flow(NAN, 0, 0.01f, 0.01f));
+    TEST_ASSERT_FALSE(fc_push_flow(NAN, 0, 0.01f, 2));
+    TEST_ASSERT_FALSE(fc_push_flow(0, 0, 0, 2));
+    TEST_ASSERT_FALSE(fc_push_flow(0, 0, 0.01f, -1));
     step(STILL, LEVEL);
-    TEST_ASSERT_EQUAL(FC_FAILSAFE_FAULT, fc_failsafe_state());
-    TEST_ASSERT_BITS_HIGH(FC_FAILSAFE_REASON_INVALID_STATE, (unsigned)safety_log("reason"));
-    TEST_ASSERT_FALSE(motors_on());
+    TEST_ASSERT_EQUAL(FC_FAILSAFE_NORMAL, fc_failsafe_state());
+    TEST_ASSERT_TRUE(fc_is_armed());
+}
+
+static void test_fresh_flow_and_range_select_zero_velocity_braking(void)
+{
+    hover();
+    for (unsigned i = 0; i < 320; i++) {
+        if (i % 10 == 0) TEST_ASSERT_TRUE(fc_push_flow(0, 0, 0.01f, 2));
+        drive(1, false, true, true, 1);
+    }
+    TEST_ASSERT_EQUAL(FC_FAILSAFE_LAND, fc_failsafe_state());
+    TEST_ASSERT_EQUAL(modeVelocity, fc_active_setpoint()->mode.x);
+    TEST_ASSERT_EQUAL(modeVelocity, fc_active_setpoint()->mode.y);
+    TEST_ASSERT_EQUAL_FLOAT(0, fc_active_setpoint()->velocity.x);
+    TEST_ASSERT_EQUAL_FLOAT(0, fc_active_setpoint()->velocity.y);
+    TEST_ASSERT_TRUE(motors_on());
+    TEST_ASSERT_FALSE(fc_push_position(0.3f, -0.2f, 1, 0.01f)); /* camera stays blocked after braking */
+    drive(90, false, true, true, 1);
+    TEST_ASSERT_FALSE(fc_push_flow(NAN, 0, 0.01f, 2));
+    drive(20, false, true, true, 1);
+    TEST_ASSERT_EQUAL(0, safety_log("flowBrake"));
+    TEST_ASSERT_EQUAL(modeDisable, fc_active_setpoint()->mode.x);
+    TEST_ASSERT_TRUE(motors_on());
+    TEST_ASSERT_FALSE(fc_push_position(0.3f, -0.2f, 1, 0.01f)); /* dropout cannot reopen camera fusion */
+    fc_init();
+    ground();
+    TEST_ASSERT_TRUE(fc_push_position(0.3f, -0.2f, 0, 0.01f)); /* explicit reset starts a new frame */
 }
 
 static void test_ground_stale_or_absent_command_never_starts_landing_motors(void)
@@ -556,7 +582,8 @@ int main(void)
     RUN_TEST(test_tof_expiry_during_dwell_uses_camera_height_and_restarts_dwell);
     RUN_TEST(test_all_height_expiry_during_dwell_is_fault_not_touchdown);
     RUN_TEST(test_invalid_estimator_is_fault);
-    RUN_TEST(test_invalid_estimator_output_is_fault);
+    RUN_TEST(test_invalid_flow_is_rejected_without_poisoning_estimator);
+    RUN_TEST(test_fresh_flow_and_range_select_zero_velocity_braking);
     RUN_TEST(test_ground_stale_or_absent_command_never_starts_landing_motors);
     RUN_TEST(test_first_command_has_bounded_arm_grace_without_motor_output);
     RUN_TEST(test_emergency_stop_and_disarm_override_latched_landing);

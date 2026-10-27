@@ -188,14 +188,15 @@ def fly_vibration(label: str, color: str, notch: bool) -> dict:
 
 
 def fly_failsafe(label: str, color: str, kind: str, *, moving: bool = False,
-                 recover_after: float | None = None) -> dict:
-    result = fly_loss("whoop2_4k", kind, moving=moving, recover_after=recover_after)
+                 recover_after: float | None = None, local_flow: bool = False) -> dict:
+    result = fly_loss("whoop2_4k", kind, moving=moving, recover_after=recover_after, local_flow=local_flow)
     log = result["log"]
     terminal = SAFETY_NAMES[int(log["safety"][-1])]
     drift = np.linalg.norm(log["pos"][:, :2] - log["pos"][0, :2], axis=1)
     return {
         "label": label, "color": color,
-        "note": ("Independent local ToF; XY hold only with fresh camera tracking. "
+        "note": (("Flow/range velocity braking; " if local_flow else "No local flow: level descent; ") +
+                 "independent local ToF; absolute XY hold only with fresh camera tracking. "
                  "LAND is latched even if commands return. No collision/XY-drift guarantee after camera loss."),
         "status": "ok" if result["passed"] and kind != "height" else "bad",
         "badge": "Final: " + terminal + (" (not a controlled landing)" if kind == "height" else ""),
@@ -204,6 +205,7 @@ def fly_failsafe(label: str, color: str, kind: str, *, moving: bool = False,
         "lost": None, "t": r(log["t"] - log["t"][0]),
         "pos": r(log["pos"]), "quat": r(log["quat"], 5), "motors": r(log["motors"]),
         "series": {"height": r(log["pos"][:, 2]), "vz": r(log["velocity"][:, 2]),
+                   "speed": r(np.linalg.norm(log["velocity"][:, :2], axis=1)),
                    "safety": r(log["safety"], 0), "drift": r(drift)},
     }
 
@@ -241,9 +243,20 @@ def scenarios() -> list[dict]:
     failsafe = [fly_failsafe("Command loss, hover", COLORS[2], "command"),
                 fly_failsafe("Both links lost, moving", COLORS[1], "both", moving=True),
                 fly_failsafe("Radio returns during LAND", COLORS[3], "command", moving=True, recover_after=2.5)]
+    braking = [fly_failsafe("Baseline: level descent", COLORS[0], "tracking", moving=True),
+               fly_failsafe("Local flow: velocity braking", COLORS[2], "tracking", moving=True, local_flow=True)]
 
     maneuver = "Roll doublet (+15 deg, -15 deg, level) with altitude hold, then a gust (roll torque kick) at t = 2.0 s."
     return [
+        {"id": "flow-brake", "title": "Camera-loss landing: local flow braking vs baseline",
+         "description": ("Both lose external camera tracking at t=0 while moving. Baseline levels and coasts. "
+                         "The candidate fuses onboard flow plus range and commands zero XY velocity while healthy. "
+                         "Stale/invalid flow falls back to degraded level descent; a jumped camera frame is not "
+                         "reacquired mid-landing. Not absolute positioning, total-height-loss recovery or hardware validation."),
+         "duration": braking[0]["t"][-1], "spacing": 2.2, "camera": [1.3, 2.4, 5.6], "target_y": .6,
+         "charts": [{"title": "XY excursion since camera loss (m)", "series": "drift"},
+                    {"title": "True horizontal speed (m/s)", "series": "speed"},
+                    {"title": "True height (m)", "series": "height"}], "drones": braking},
         {"id": "failsafe", "title": "Latched link-loss landing (opt-in C SITL)",
          "description": ("Input loss at t=0. Command-only loss captures a fixed pose after 500 ms, holds 1.5 s, "
                          "then descends. Camera loss starts level descent after 300 ms using local ToF, without "

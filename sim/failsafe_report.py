@@ -15,6 +15,7 @@ import numpy as np
 
 from sitl import SitlDrone
 from sitl.drone import figure8
+from model.params import DEFAULT_SENSORS, Sensors
 from sitl.firmware import FAILSAFE_FAULT, FAILSAFE_HOLD, FAILSAFE_LAND, FAILSAFE_LANDED, FAILSAFE_NORMAL
 
 OUT = Path(__file__).resolve().parent / "reports" / "failsafe"
@@ -22,16 +23,21 @@ NAMES = ("NORMAL", "HOLD", "LAND", "LANDED", "FAULT")
 
 
 def fly_loss(profile: str, kind: str = "command", *, moving: bool = False, seed: int = 9,
-             recover_after: float | None = None, tracking_jump: tuple = (0., 0., 0.)) -> dict:
+             recover_after: float | None = None, tracking_jump: tuple = (0., 0., 0.),
+             local_flow: bool = False, flow_scale: float = 1., flow_latency_s: float = 0.,
+             sensors: Sensors = DEFAULT_SENSORS, yaw_deg: float = 0.) -> dict:
     """Drop command, camera, both, or all-height inputs independently. Record through recovery."""
-    d = SitlDrone(seed=seed, profile=profile, safe_landing=True)
+    d = SitlDrone(seed=seed, profile=profile, safe_landing=True, local_flow=local_flow, sensors=sensors)
+    d.flow_scale = flow_scale
+    d.flow_latency_s = flow_latency_s
     d.calibrate_and_arm()
     d.takeoff(1.0, 2.0)
     d.run(4.0, record_hz=None)
     if not d.fw.armed or abs(d.quad.state.pos[2] - 1.0) > 0.05:
         raise AssertionError("loss scenario did not establish a 1 m flying hover")
     if moving:
-        d.follow(figure8(d.time, np.array([0., 0., 1.]), 0.6, 8.0))
+        trajectory = figure8(d.time, np.array([0., 0., 1.]), 0.6, 8.0)
+        d.follow(lambda t: (*trajectory(t)[:3], yaw_deg))
         d.run(3.5, record_hz=None)
     loss_time = d.time
     loss_pos = d.quad.state.pos.copy()
@@ -84,8 +90,12 @@ def fly_loss(profile: str, kind: str = "command", *, moving: bool = False, seed:
             passed = passed and hold_drift < 0.25
         if kind == "tracking" and recover_after is not None:
             restored_window = t > recover_after + 0.05
-            passed = (passed and np.all(log["attitude_target"][restored_window] == 0)
-                      and np.any(log["position_fresh"][restored_window]))
+            if local_flow:
+                passed = (passed and np.any(log["flow_braking"][restored_window])
+                          and not np.any(log["position_fresh"][restored_window & (states == FAILSAFE_LAND)]))
+            else:
+                passed = (passed and np.all(log["attitude_target"][restored_window] == 0)
+                          and np.any(log["position_fresh"][restored_window]))
     passed = bool(passed and not d.fw.tumbled and d.fw.assert_count == 0)
     return {"drone": d, "log": log, "profile": profile, "kind": kind, "moving": moving,
             "recover_after": recover_after, "tracking_jump": tracking_jump, "loss_time": loss_time, "sequence": sequence,

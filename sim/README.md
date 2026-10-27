@@ -8,6 +8,7 @@ make sim-test    # model consistency tests
 make g1          # gate G1 report -> sim/reports/g1/README.md
 make vibration   # Task 1.6b vibration/notch report -> sim/reports/vibration/README.md
 make failsafe    # opt-in latched hold/landing evidence -> sim/reports/failsafe/README.md
+make flow-braking # local flow/range braking vs passive drift -> sim/reports/flow_braking/README.md
 make viewer      # interactive G1 studies + C SITL figure-8, square, flow-drift and vibration replays
 ```
 
@@ -123,8 +124,8 @@ to the camera-tracked model. It is disabled by default, not activated in the pro
 
 - At 500 ms command silence, capture the **current estimated pose**, remove trajectory feedforward,
   hold for 1.5 s, then land. A recovered command may cancel HOLD but never LAND.
-- At 300 ms without camera input, start landing even if commands still arrive. Disable stale XY
-  control and level; use independent local range for height. Do not claim bounded XY drift.
+- At 300 ms without camera input, start landing even if commands still arrive. Disable stale absolute
+  XY hold; use qualified local flow/range for zero-velocity braking when present, otherwise level.
 - LAND remains latched through a height/vertical-speed touchdown dwell; terminal LANDED disarms
   and blocks automatic rearm. Emergency stop and tumble protections always override.
 - Missing all reliable height or a timed-out landing is a separate FAULT/motor stop, **not** successful
@@ -135,7 +136,7 @@ and XY excursion for hover/moving loss and recovery scenarios at both loop rates
 viewer adds `?scenario=failsafe` with height/speed/state/drift charts. Tests verify actual motor output
 and truth positions through touchdown/recovery, not only state flags.
 
-In the nominal seed-9 report, controlled cases land 5.24-7.05 s after loss, reach about 0.263 m/s maximum
+In the baseline seed-9 report (no local flow), controlled cases land 5.24-7.05 s after loss, reach about 0.263 m/s maximum
 downward speed, approach ground at a sampled 0.093-0.102 m/s, and disarm at ground. Command recovery
 during LAND does not restart flight. **Moving camera loss still drifts about 1.7-2.0 m horizontally**
 (the larger excursion is after a restored/jumped camera reference);
@@ -147,6 +148,19 @@ occlusion; approach speed is the last 100 Hz pre-contact sample (physics clamps 
 at ground). Freshness is packet receipt age, not replay/freeze detection, acquisition age or estimator
 quality. All thresholds and touchdown heuristics need physical measurements before hardware activation.
 No collision-safe flight or improvement to FLOW-01 is claimed. See `docs/fc_core.md` and the report.
+
+### Applied camera-loss drift fix
+
+Enable `local_flow=True` alongside `safe_landing=True` for combined camera/local-flow/ToF inputs.
+Flow has a separate RNG; `flow_up`, `flow_scale`, and `flow_latency_s` support dropout/bias/delay
+experiments. No ground-truth velocity is passed directly to the firmware. `make flow-braking`
+shows nominal excursion **1.71-1.72 m -> 0.277-0.290 m**; sampled stresses reach 0.349 m.
+The fixed targets were <= 0.35 m nominal / <= 0.50 m sampled stress. This is emergency braking,
+not centimeter-level absolute positioning. See `?scenario=flow-brake` in the viewer.
+
+All reliable height lost still FAULTs. A BMP581 fallback needs pressure-error and contact-detection
+validation; its low noise alone does not justify 4 cm touchdown detection. Research sources and
+remaining work: `reports/Resilient landing without camera.md`.
 
 ## Open accuracy issue: FLOW-01
 

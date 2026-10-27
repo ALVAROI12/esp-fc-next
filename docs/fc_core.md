@@ -67,7 +67,7 @@ make core-coverage   # coverage summary + HTML report in build/coverage/index.ht
 Run `make core-coverage` for current measured coverage. INDI, Mellinger, the trajectory planner,
 and several optional Kalman measurements still lack comprehensive tests; the 80% whole-core
 quality gate has not been met.
-After latched-landing regressions: 54.0% lines, 55.3% functions and 57.0% branches in the
+After flow-braking regressions: 54.3% lines, 55.4% functions and 56.7% branches in the
 configured coverage scope. Passing these tests does not close G3.
 
 ## fc_step: the synchronous flight loop (Task 1.5)
@@ -178,8 +178,9 @@ not activate a new production P4 task loop or change any CRTP packet formats.
 | FAULT (4) | Missing trustworthy height, invalid state, or landing timeout: motor stop; **not** successful controlled landing |
 
 Camera input older than 300 ms triggers LAND even if commands still arrive. XY hold is allowed only
-with fresh tracking; after tracking loss the remainder of that landing uses level roll/pitch and
-does not reacquire a potentially jumped XY reference. Independent ToF (200 ms freshness, tilt checked)
+with fresh tracking; after tracking loss it uses local velocity braking when qualified flow/range
+is available, otherwise level roll/pitch. It never resumes absolute XY hold in that landing.
+Independent ToF (200 ms freshness, tilt checked)
 supports vertical control; fresh camera height relative to the arming ground is a fallback. A 20 s
 landing timeout bounds a stuck descent. Emergency stop, explicit disarm and tumble remain authoritative.
 LANDED/FAULT require explicit ground reinitialization, not automatic restart when the radio recovers.
@@ -189,7 +190,7 @@ LANDED/FAULT require explicit ground reinitialization, not automatic restart whe
 the viewer scenario is `?scenario=failsafe`. `SitlDrone(..., safe_landing=True)` adds independent
 local ToF; `link_up`, `tracking_up` and `height_up` independently gate command, camera and range delivery.
 
-Nominal seed-9 SITL at 1/4 kHz: controlled cases reach LANDED about 5.24-7.05 s after loss,
+Baseline without local flow, seed-9 SITL at 1/4 kHz: controlled cases reach LANDED about 5.24-7.05 s after loss,
 max descent about 0.263 m/s, sampled final approach 0.093-0.102 m/s, and motor disarm at ground.
 Restored commands during LAND do not restart flight. Moving camera-only loss still produces
 about **1.7 m XY excursion**, rising to about **2.0 m** with the restored/jumped camera reference
@@ -199,7 +200,8 @@ not a safe-landing pass. See the report for the exact cases, gates and sampled m
 
 Review regressions also cover local-range expiry during the touchdown dwell (camera-height fallback
 must reset it; losing both sources must FAULT), and restored camera input with a (+0.5, -0.4, 0) m
-reference jump during LAND. Actual controller roll/pitch targets remain zero after that restoration.
+reference jump during LAND. Without local flow, controller roll/pitch targets remain zero after restoration;
+with local braking engaged, restored camera packets are rejected until the landing ends.
 Safety qualification does not narrow the disabled/legacy estimator's range/tilt acceptance; a
 both-rate regression checks legacy ToF acceptance at >60-degree tilt separately from supervisor trust.
 
@@ -209,6 +211,26 @@ a height/vertical-speed dwell heuristic, not a contact sensor. No bounded XY dri
 camera loss, especially while moving. All-height-loss fault containment can cause a fall and must
 never be counted as a successful controlled landing. Hardware sensor offsets, occlusion, ground
 geometry and touchdown remain unvalidated; FLOW-01 is unchanged.
+
+### Local flow emergency braking
+
+`SitlDrone(..., safe_landing=True, local_flow=True)` fuses independent modeled local flow with
+the EKF, then requests zero XY velocity after camera loss. In the portable runtime the existing
+safe-mode switch is sufficient: flow must be successfully queued, finite, plausible, with positive
+dt/std, recent (100 ms) and supported by fresh usable ToF at least 12 cm above ground. Missing or
+rejected flow/range returns to degraded level descent, not unaided velocity hold. These checks
+are not a substitute for a hardware driver's surface-quality/motion-valid flags or calibration.
+
+`make flow-braking` compares baseline/candidate and stress cases. Nominal camera-loss excursion
+falls from 1.71-1.72 m to **0.277-0.290 m**; the sampled stress envelope reaches **0.349 m** (three
+seeds, +/-20% flow scale, doubled noise, 20 ms delay and 90-degree heading, both loop rates).
+The predeclared gates are 0.35 m nominal / 0.50 m sampled stress, not the 5 cm positioning gate.
+`fcSafety.flowFresh/flowBrake` expose qualification/active braking; the replay is `?scenario=flow-brake`.
+
+This does not fix FLOW-01, all-height loss, arbitrary low-texture/lighting/wind failures or hardware
+flight. Research and the barometer/contact-sensing follow-up are in
+`reports/Resilient landing without camera.md`. Free research agents were quota-blocked; no independent
+agent-review claim is made for this stage.
 
 ## Patches applied to the ESP-Drone subtree
 
