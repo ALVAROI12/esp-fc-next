@@ -111,5 +111,9 @@ if(FC_FUZZ)
     target_link_libraries(fuzz_link PRIVATE m)
 endif()
 
-enable_testing()
-add_subdirectory(tests)
+# The SITL turns this off so its configure step needs no network (Unity is fetched from GitHub).
+option(FC_BUILD_TESTS "Build the Unity test suites" ON)
+if(FC_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()

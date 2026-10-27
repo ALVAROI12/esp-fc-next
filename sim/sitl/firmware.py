@@ -15,6 +15,7 @@ import sys
 import tempfile
 import threading
 import atexit
+import fcntl
 
 REPO = Path(__file__).resolve().parents[2]
 SOURCE_DIRS = [REPO / "firmware/fc_core", REPO / "firmware/flight/components/core/crazyflie"]
@@ -49,12 +50,16 @@ def library_path(variant: str = "1k", rebuild: bool | None = None) -> Path:
     """Path to a SITL library variant, (re)building it with CMake when missing or older than the sources."""
     target = VARIANTS[variant]
     lib = BUILD_DIR / f"lib{target}{LIB_EXT}"
-    with _build_lock:
+    BUILD_DIR.mkdir(parents=True, exist_ok=True)
+    # Thread lock for drones in this process, file lock for report processes running in parallel.
+    with _build_lock, open(BUILD_DIR / ".build.lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
         stale = not lib.exists() or lib.stat().st_mtime < _newest_source_mtime()
         if rebuild or (rebuild is None and stale):
             generator = ["-G", "Ninja"] if shutil.which("ninja") else []
             subprocess.run(["cmake", "-S", str(REPO / "firmware/fc_core"), "-B", str(BUILD_DIR), *generator,
-                            "-DCMAKE_BUILD_TYPE=Release"], check=True, stdout=subprocess.DEVNULL)
+                            "-DCMAKE_BUILD_TYPE=Release", "-DFC_BUILD_TESTS=OFF"], check=True,
+                           stdout=subprocess.DEVNULL)
             subprocess.run(["cmake", "--build", str(BUILD_DIR), "--target", target], check=True,
                            stdout=subprocess.DEVNULL)
     return lib
