@@ -192,7 +192,9 @@ hardware blackbox measurements before flight.
   measure 4 kHz deadlines on the P4 before activation (not proved by a host timing configuration).
 - **Link-loss safety:** see the opt-in design and evidence below; validate range/ground offsets,
   stale-sensor detection and physical touchdown before enabling on hardware.
-- **Four-drone swarm simulation:** coordinated takeoff/landing, formation, collision and packet loss.
+- **Radio link on hardware:** both SPI ends, the ground serial link and provisioning are host-tested and
+  compile-checked (docs/protocols.md); set real pins, then measure link-loss timing on boards. A cflib /
+  Crazyswarm2 driver on `tools/espfc_link.py` is still to write. (The four-drone swarm SITL is done: `make swarm`.)
 - **FLOW-01:** flow/ToF alone does not meet absolute XY positioning accuracy. See `sim/README.md`.
 
 ## Opt-in latched hold-and-land

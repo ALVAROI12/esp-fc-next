@@ -235,7 +235,7 @@ def build():
          "position/ToF/flow are dropped in legacy mode too. Regression tests failed before the fix."],
         ["1.7 Link protocols", "In progress",
          "docs/protocols.md: 64-byte P4-C5 SPI frame with CRC-16, 20-byte 50 Hz swarm status, 32-message "
-         "anti-replay window; unit tests + libFuzzer (make link-fuzz, 1 h run: 4.3 B inputs, no crash); builds on "
+         "anti-replay window; unit tests + libFuzzer (make link-fuzz, 1 h run: 4.1 B inputs, no crash); builds on "
          "the C5 toolchain. AES-128-CCM envelope built on IDF mbedtls 3.6.7 with RFC 3610 vector tests; C5 boot "
          "self-check not yet run on a board. C5 bridge (fc_radio): envelope &lt;-&gt; SPI frame, ground-only commands, "
          "NVS-reserved counters (no nonce reuse across reboot); C5 image wires ESP-NOW + SPI slave. P4 side: "
