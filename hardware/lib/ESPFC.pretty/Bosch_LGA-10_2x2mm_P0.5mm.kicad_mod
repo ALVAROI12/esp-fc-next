@@ -3,7 +3,7 @@
   (generator "espfc_library")
   (layer "F.Cu")
   (descr "Bosch BMP581 LGA-10 2x2 mm (BST-BMP581-DS004-13 section 8.2), no solder mask under the sensor")
-  (attr smd)
+  (attr smd allow_soldermask_bridges)
   (property "Reference" "REF**" (at 0 -1.85 0) (layer "F.SilkS") (effects (font (size 0.5 0.5) (thickness 0.1))))
   (property "Value" "Bosch_LGA-10_2x2mm_P0.5mm" (at 0 1.85 0) (layer "F.Fab") (effects (font (size 0.5 0.5) (thickness 0.1))))
   (fp_rect (start -1 -1) (end 1 1) (stroke (width 0.1) (type solid)) (fill no) (layer "F.Fab"))

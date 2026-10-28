@@ -113,6 +113,19 @@ sheet loads in KiCad, passes KiCad's ERC and exports a netlist identical in conn
 (FB resistor, GPIO36 pull-up, shunt value, C5 pin, FB_DCDC wire, wrong footprint, missing footprint, routed sheets,
 unquoted symbol text, a missing PWR_FLAG) each fail a test.
 
+## PCB placement (`make hw-pcb`)
+`pcb.py` (run by KiCad's Python) turns each netlist into `out/<board>.kicad_pcb`: 25.5 mm square, 4 layers, M2 holes
+on a 20 mm square, every footprint with its nets, greedy courtyard placement on a 0.125 mm grid. Fixed: the stack
+header on the left edge between the holes (FC: header on top; radio: socket on the bottom, same pad XY and nets),
+USB-C on the bottom edge. The P4, crystal and IMU stay on top; the rest may go underneath. pF/nF caps are 0201: with
+0402 the flight board did not fit (16 caps left over at ~85 % courtyard fill). Not routed. The rules in
+`out/<board>.kicad_pro` (0.1 mm track/space, 0.3/0.15 mm vias) are generic placeholders, not a fab's limits.
+`make hw-pcb` also renders `out/render/*.png` and plots the power-path transient to `out/power_transient.png`.
+KiCad DRC after placement, besides unrouted nets and silkscreen: the FC stack header courtyard overlaps two M2 hole
+courtyards (header body clears an M2 head by ~0.5 mm); the radio board's C5 module courtyard overlaps all four hole
+courtyards, and two holes sit next to the antenna keep-out. Test: both boards fit, and the stack pads line up with
+the same nets (a wrong bottom-side rotation fails it).
+
 ## Libraries
 `lib/espressif/`: Espressif official KiCad symbols (ESP32-P4X, ESP32-C5-MINI-1) and footprints, CC-BY-SA 4.0 with
 the KiCad design exception (`LICENSE.md`, upstream commit in `UPSTREAM`). Other parts come from KiCad's own library;
@@ -134,4 +147,7 @@ land pattern) and Murata DFE201610E-2R2M.
 - Crystal load caps 12 pF assume CL 10 pF and ~4 pF stray; set from the chosen crystal.
 - Stack connector part and pitch; flow/ToF module connector; ESC connector pinout (varies by ESC vendor).
 - Sheets are machine-placed and dense (one A3 page per board); connectivity is verified, readability is not.
+- Stack height: the FC top carries a 4.25 mm tall JST-SH vertical and the USB-C; the stack connector must clear them.
+- Radio board: M2 screws next to the antenna; nylon screws there, or a different hole pattern on that board.
+- Routing, ground pours, via fanout under the P4 and the fab's rules; 3D models for the P4 and C5 (pads only now).
 - Not simulated: converter loop stability, C5 TX burst transients on 3V3, layout parasitics.

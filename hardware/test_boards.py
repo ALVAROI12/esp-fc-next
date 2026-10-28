@@ -219,3 +219,31 @@ def test_drawn_schematic_loads_passes_kicad_erc_and_matches_the_netlist(name, tm
     out = run("export", "netlist", "-o", str(tmp_path / "drawn.net"))
     assert "annotation" not in out.stdout + out.stderr
     assert connectivity(tmp_path / "drawn.net") == connectivity(tmp_path / "skidl.net")
+
+
+KICAD_PY = Path("/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3")
+STACK_PADS = """
+import sys, pcbnew
+for fp in pcbnew.LoadBoard(sys.argv[1]).GetFootprints():
+    if fp.GetValue() == "STACK":
+        print("bottom" if fp.IsFlipped() else "top")
+        for p in fp.Pads():
+            print(round(pcbnew.ToMM(p.GetPosition().x), 2), round(pcbnew.ToMM(p.GetPosition().y), 2), p.GetNetname())
+"""
+
+
+@pytest.mark.skipif(not KICAD_PY.exists(), reason="needs KiCad's Python (pcbnew)")
+def test_pcb_placement_fits_both_boards_and_the_stack_pins_line_up(tmp_path):
+    pads = {}
+    for name in boards.BOARDS:
+        boards.build(name).generate_netlist(file_=str(tmp_path / f"{name}.net"))
+        pcb = tmp_path / f"{name}.kicad_pcb"
+        fit = subprocess.run([str(KICAD_PY), str(boards.HERE / "pcb.py"), str(tmp_path / f"{name}.net"), str(pcb),
+                              "25.5", "20"], capture_output=True, text=True)
+        assert fit.returncode == 0, fit.stdout
+        side, *rows = subprocess.run([str(KICAD_PY), "-c", STACK_PADS, str(pcb)], capture_output=True, text=True,
+                                     check=True).stdout.split("\n")[:-1]
+        pads[name] = (side, sorted(rows))
+    (fc_side, fc), (radio_side, radio) = pads["fc_board"], pads["radio_board"]
+    assert (fc_side, radio_side) == ("top", "bottom")  # header up on the FC, socket down on the radio board
+    assert len(fc) == 12 and fc == radio  # same XY carries the same net on both boards

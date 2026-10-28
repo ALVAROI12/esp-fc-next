@@ -58,7 +58,7 @@ def footprint(name, descr, pads, body, mask_margin=None, open_mask=False):
     court = (round(2 * max(xs) + 0.5, 2), round(2 * max(ys) + 0.5, 2))  # 0.25 mm courtyard clearance
     bx, by = body[0] / 2, body[1] / 2
     s = (f'(footprint "{name}"\n  (version 20260206)\n  (generator "espfc_library")\n  (layer "F.Cu")\n'
-         f'  (descr "{descr}")\n  (attr smd)\n'
+         f'  (descr "{descr}")\n  (attr smd{" allow_soldermask_bridges" if open_mask else ""})\n'
          f'  (property "Reference" "REF**" (at 0 {-court[1] / 2 - 0.6:g} 0) (layer "F.SilkS")'
          ' (effects (font (size 0.5 0.5) (thickness 0.1))))\n'
          f'  (property "Value" "{name}" (at 0 {court[1] / 2 + 0.6:g} 0) (layer "F.Fab")'

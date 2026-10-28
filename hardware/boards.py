@@ -28,6 +28,7 @@ P4 = dict(IMU_CS=7, IMU_MOSI=8, IMU_SCLK=9, IMU_MISO=10, IMU_INT=11,  # SPI2 IO 
 C5 = dict(C5_MOSI=8, C5_MISO=9, C5_SCLK=6, C5_CS=10, P4_TX=12, P4_RX=11)  # UART0: RX=12 gets P4_TX
 
 R0402, C0402, C0603 = "Resistor_SMD:R_0402_1005Metric", "Capacitor_SMD:C_0402_1005Metric", "Capacitor_SMD:C_0603_1608Metric"
+C0201 = "Capacitor_SMD:C_0201_0603Metric"  # pF/nF caps: the 25.5 mm board does not fit them all as 0402
 
 
 def r(a, b, value, fp=R0402):
@@ -37,8 +38,8 @@ def r(a, b, value, fp=R0402):
     return p
 
 
-def c(a, b, value, fp=C0402):
-    p = Part("Device", "C", value=value, footprint=fp)
+def c(a, b, value, fp=None):
+    p = Part("Device", "C", value=value, footprint=fp or (C0201 if value[-1] in "pn" else C0402))
     a += p[1]
     b += p[2]
     return p
@@ -166,9 +167,9 @@ def fc_board():
     r(net("STRAP34", gpio(p4, 34)), gnd, "10k")
 
     # Flash, 3.3 V, dedicated pins.
-    fl = Part("Memory_Flash", "W25Q128JVS")
+    fl = Part("Memory_Flash", "W25Q128JVP")  # WSON-8 6x5 mm (SOIC-8 did not fit, pcb.py)
     fl["VCC"] += v33
-    fl["GND"] += gnd
+    fl["GND", "EP"] += gnd
     c(v33, gnd, "100n")
     for p4pin, flpin in (("FLASH_CS", 1), ("FLASH_Q", 2), ("FLASH_WP", 3), ("FLASH_D", 5), ("FLASH_CK", 6),
                          ("FLASH_HOLD", 7)):
@@ -228,10 +229,10 @@ def fc_board():
     ina["SCL"] += sig["SCL"]
     c(v33, gnd, "100n")
 
-    # Connectors: ESC (8-pin JST-SH, check the ESC's pinout), CRSF receiver, flow/ToF module, C5 radio stack.
+    # Connectors (vertical JST-SH): ESC (8-pin, check the ESC's pinout), CRSF receiver, flow/ToF module; C5 radio stack.
     def jst(n, ref, nets):
         j = Part("Connector_Generic", f"Conn_01x{n:02d}", ref=ref,
-                 footprint=f"Connector_JST:JST_SH_SM{n:02d}B-SRSS-TB_1x{n:02d}-1MP_P1.00mm_Horizontal")
+                 footprint=f"Connector_JST:JST_SH_BM{n:02d}B-SRSS-TB_1x{n:02d}-1MP_P1.00mm_Vertical")
         for i, net in enumerate(nets, 1):
             net += j[i]
         return j
@@ -239,7 +240,9 @@ def fc_board():
     jst(8, "J2", [vbat, gnd, sig["ESC_CUR"], sig["ESC_TLM"], sig["M1"], sig["M2"], sig["M3"], sig["M4"]])
     jst(4, "J3", [v33, gnd, sig["CRSF_TX"], sig["CRSF_RX"]])
     jst(8, "J4", [v33, gnd, sig["C5_SCLK"], sig["C5_MOSI"], sig["C5_MISO"], sig["FLOW_CS"], sig["SDA"], sig["SCL"]])
-    jst(3, "J5", [gnd, net("U0TXD", gpio(p4, 37)), net("U0RXD", gpio(p4, 38))])  # debug UART0
+    for name, n in (("U0TXD", 37), ("U0RXD", 38)):  # debug UART0 on test pads
+        tp = Part("Connector", "TestPoint", value=name, footprint="TestPoint:TestPoint_Pad_D1.0mm")
+        net(name, gpio(p4, n), tp[1])
     stack_connector({"3V3": v33, "GND": gnd, **sig})
 
     for pin in p4.pins:  # spare GPIOs

@@ -116,6 +116,16 @@ hw-setup:
 hw:
 	cd hardware && .venv/bin/python library.py && .venv/bin/python boards.py && .venv/bin/python -m pytest -q -p no:cacheprovider test_boards.py
 
+KICAD_PY = /Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3
+KICAD_CLI = /Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli
+# First-pass PCB placement, 3D renders and the power-path plot in hardware/out/ (after `make hw`).
+hw-pcb:
+	cd hardware && mkdir -p out/render && for b in fc_board radio_board; do \
+	  $(KICAD_PY) pcb.py out/$$b.net out/$$b.kicad_pcb 25.5 20 && for s in top bottom; do \
+	  $(KICAD_CLI) pcb render --side $$s --width 1400 --height 1400 --quality high --zoom 1 --background opaque \
+	  -o out/render/$$b-$$s.png out/$$b.kicad_pcb || exit 1; done; done
+	cd hardware && uv run -q --with matplotlib --with-requirements requirements.txt python plot_power.py
+
 # Gate G1 math-model report -> sim/reports/g1/README.md (non-zero exit if the gate fails).
 g1:
 	cd sim && .venv/bin/python g1_report.py

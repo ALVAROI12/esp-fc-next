@@ -44,6 +44,18 @@ def simulate(ocv=3.5, rint=0.05, i_motor=16.0, r_shunt=0.01, r_fet=0.03, p_out=3
     return float(meas["vsys_min"]), float(meas["vbat_min"])
 
 
+def trace(ocv=3.5, rint=0.05, i_motor=16.0, r_shunt=0.01, r_fet=0.03, p_out=3.3 * 1.0, eff=0.85):
+    """Waveforms of the same run: rows of (t s, VBAT V, VSYS V, battery current A)."""
+    with tempfile.TemporaryDirectory() as d:
+        cir, dat = Path(d) / "power.cir", Path(d) / "power.dat"
+        cir.write_text(NETLIST.format(ocv=ocv, rint=rint, i_motor=i_motor, p_out=p_out, eff=eff, uvlo=UVLO_FALLING,
+                                      vsys0=ocv - 0.2, r_shunt=r_shunt, r_fet=r_fet).replace(
+            ".end", f".control\nrun\nwrdata {dat} v(vbat) v(vsys) i(Vocv)\n.endc\n.end"))
+        subprocess.run(["ngspice", "-b", str(cir)], capture_output=True, check=True)
+        rows = [list(map(float, line.split())) for line in dat.read_text().splitlines()]
+    return [(r[0], r[1], r[3], -r[5]) for r in rows]  # wrdata repeats the time column before every vector
+
+
 def max_battery_resistance(ocv=3.5, i_motor=16.0, lo=0.0, hi=0.3):
     """Largest pack internal resistance that keeps VSYS at or above VIN_FULL_LOAD (bisection, 1 mOhm)."""
     while hi - lo > 0.001:
