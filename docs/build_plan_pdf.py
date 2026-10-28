@@ -490,7 +490,7 @@ def build():
         ["BMP581 breakout (e.g., SparkFun)", "1", "Barometer driver"],
         ["PMW3901 + VL53L1X breakouts", "1 each", "Flow and height drivers"],
         ["INA226 breakout", "1", "Power monitor driver"],
-        ["ESP32-C5 DevKit", "1", "Swarm USB dongle firmware"],
+        ["ESP32-C5 DevKit", "2", "One on the P4 over SPI (drone radio, the board's C6 is SDIO-only); one as the ground USB dongle"],
         ["PS3 Eye cameras", "2 (4 later)", "Early mocap testing"],
         ["Logic analyzer (8 ch, low cost)", "1", "Measure loop timing, SPI and DShot signals"],
     ], [3.4, 1.0, 2.6])]))
