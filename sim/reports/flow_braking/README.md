@@ -6,34 +6,34 @@ Same real C runtime and nominal 2-inch model, both loop rates. All losses start 
 
 | Profile | Case | Max XY excursion | Max descent | Sampled approach | Drift gate | Result |
 | --- | --- | --- | --- | --- | --- | --- |
-| whoop2_interim | baseline, no local flow | 1.719 m | 0.261 m/s | 0.102 m/s | baseline only | PASS |
-| whoop2_interim | flow, nominal | 0.290 m | 0.287 m/s | 0.101 m/s | 0.35 m | PASS |
-| whoop2_interim | flow, seed 1 | 0.327 m | 0.292 m/s | 0.090 m/s | 0.50 m | PASS |
-| whoop2_interim | flow, seed 5 | 0.349 m | 0.289 m/s | 0.096 m/s | 0.50 m | PASS |
-| whoop2_interim | flow, scale -20% | 0.294 m | 0.283 m/s | 0.101 m/s | 0.50 m | PASS |
-| whoop2_interim | flow, scale +20% | 0.286 m | 0.292 m/s | 0.101 m/s | 0.50 m | PASS |
-| whoop2_interim | flow, delay 20ms | 0.291 m | 0.288 m/s | 0.101 m/s | 0.50 m | PASS |
-| whoop2_interim | flow, yaw 90deg | 0.290 m | 0.284 m/s | 0.100 m/s | 0.50 m | PASS |
-| whoop2_interim | flow, doubled pixel noise | 0.290 m | 0.289 m/s | 0.100 m/s | 0.50 m | PASS |
-| whoop2_interim | flow, rotation factor -20% | 0.292 m | 0.285 m/s | 0.101 m/s | 0.50 m | PASS |
-| whoop2_interim | flow, rotation factor +20% | 0.288 m | 0.291 m/s | 0.101 m/s | 0.50 m | PASS |
-| whoop2_interim | flow, sensor mount yaw 15deg | 0.289 m | 0.287 m/s | 0.101 m/s | 0.50 m | PASS |
-| whoop2_interim | flow, ToF reads 2 cm long | 0.289 m | 0.307 m/s | 0.102 m/s | 0.50 m | PASS |
-| whoop2_interim | flow, restored jumped camera | 0.290 m | 0.287 m/s | 0.101 m/s | 0.35 m | PASS |
-| whoop2_4k | baseline, no local flow | 1.706 m | 0.259 m/s | 0.096 m/s | baseline only | PASS |
-| whoop2_4k | flow, nominal | 0.277 m | 0.276 m/s | 0.093 m/s | 0.35 m | PASS |
-| whoop2_4k | flow, seed 1 | 0.328 m | 0.269 m/s | 0.095 m/s | 0.50 m | PASS |
-| whoop2_4k | flow, seed 5 | 0.348 m | 0.268 m/s | 0.094 m/s | 0.50 m | PASS |
-| whoop2_4k | flow, scale -20% | 0.283 m | 0.272 m/s | 0.094 m/s | 0.50 m | PASS |
-| whoop2_4k | flow, scale +20% | 0.271 m | 0.279 m/s | 0.094 m/s | 0.50 m | PASS |
-| whoop2_4k | flow, delay 20ms | 0.278 m | 0.281 m/s | 0.094 m/s | 0.50 m | PASS |
-| whoop2_4k | flow, yaw 90deg | 0.281 m | 0.270 m/s | 0.094 m/s | 0.50 m | PASS |
-| whoop2_4k | flow, doubled pixel noise | 0.278 m | 0.276 m/s | 0.093 m/s | 0.50 m | PASS |
-| whoop2_4k | flow, rotation factor -20% | 0.280 m | 0.273 m/s | 0.093 m/s | 0.50 m | PASS |
-| whoop2_4k | flow, rotation factor +20% | 0.274 m | 0.278 m/s | 0.093 m/s | 0.50 m | PASS |
-| whoop2_4k | flow, sensor mount yaw 15deg | 0.277 m | 0.274 m/s | 0.093 m/s | 0.50 m | PASS |
-| whoop2_4k | flow, ToF reads 2 cm long | 0.276 m | 0.293 m/s | 0.097 m/s | 0.50 m | PASS |
-| whoop2_4k | flow, restored jumped camera | 0.277 m | 0.276 m/s | 0.093 m/s | 0.35 m | PASS |
+| whoop2_interim | baseline, no local flow | 1.712 m | 0.261 m/s | 0.131 m/s | baseline only | PASS |
+| whoop2_interim | flow, nominal | 0.290 m | 0.287 m/s | 0.132 m/s | 0.35 m | PASS |
+| whoop2_interim | flow, seed 1 | 0.327 m | 0.292 m/s | 0.135 m/s | 0.50 m | PASS |
+| whoop2_interim | flow, seed 5 | 0.346 m | 0.289 m/s | 0.139 m/s | 0.50 m | PASS |
+| whoop2_interim | flow, scale -20% | 0.294 m | 0.283 m/s | 0.133 m/s | 0.50 m | PASS |
+| whoop2_interim | flow, scale +20% | 0.286 m | 0.292 m/s | 0.132 m/s | 0.50 m | PASS |
+| whoop2_interim | flow, delay 20ms | 0.291 m | 0.288 m/s | 0.132 m/s | 0.50 m | PASS |
+| whoop2_interim | flow, yaw 90deg | 0.290 m | 0.284 m/s | 0.136 m/s | 0.50 m | PASS |
+| whoop2_interim | flow, doubled pixel noise | 0.290 m | 0.289 m/s | 0.132 m/s | 0.50 m | PASS |
+| whoop2_interim | flow, rotation factor -20% | 0.292 m | 0.285 m/s | 0.132 m/s | 0.50 m | PASS |
+| whoop2_interim | flow, rotation factor +20% | 0.288 m | 0.291 m/s | 0.132 m/s | 0.50 m | PASS |
+| whoop2_interim | flow, sensor mount yaw 15deg | 0.289 m | 0.287 m/s | 0.132 m/s | 0.50 m | PASS |
+| whoop2_interim | flow, ToF reads 2 cm long | 0.289 m | 0.307 m/s | 0.116 m/s | 0.50 m | PASS |
+| whoop2_interim | flow, restored jumped camera | 0.290 m | 0.287 m/s | 0.132 m/s | 0.35 m | PASS |
+| whoop2_4k | baseline, no local flow | 1.693 m | 0.259 m/s | 0.139 m/s | baseline only | PASS |
+| whoop2_4k | flow, nominal | 0.277 m | 0.275 m/s | 0.133 m/s | 0.35 m | PASS |
+| whoop2_4k | flow, seed 1 | 0.328 m | 0.269 m/s | 0.140 m/s | 0.50 m | PASS |
+| whoop2_4k | flow, seed 5 | 0.346 m | 0.268 m/s | 0.143 m/s | 0.50 m | PASS |
+| whoop2_4k | flow, scale -20% | 0.283 m | 0.272 m/s | 0.134 m/s | 0.50 m | PASS |
+| whoop2_4k | flow, scale +20% | 0.271 m | 0.279 m/s | 0.132 m/s | 0.50 m | PASS |
+| whoop2_4k | flow, delay 20ms | 0.278 m | 0.281 m/s | 0.132 m/s | 0.50 m | PASS |
+| whoop2_4k | flow, yaw 90deg | 0.281 m | 0.270 m/s | 0.135 m/s | 0.50 m | PASS |
+| whoop2_4k | flow, doubled pixel noise | 0.277 m | 0.276 m/s | 0.132 m/s | 0.50 m | PASS |
+| whoop2_4k | flow, rotation factor -20% | 0.280 m | 0.273 m/s | 0.133 m/s | 0.50 m | PASS |
+| whoop2_4k | flow, rotation factor +20% | 0.274 m | 0.278 m/s | 0.133 m/s | 0.50 m | PASS |
+| whoop2_4k | flow, sensor mount yaw 15deg | 0.277 m | 0.274 m/s | 0.133 m/s | 0.50 m | PASS |
+| whoop2_4k | flow, ToF reads 2 cm long | 0.276 m | 0.292 m/s | 0.118 m/s | 0.50 m | PASS |
+| whoop2_4k | flow, restored jumped camera | 0.277 m | 0.275 m/s | 0.133 m/s | 0.35 m | PASS |
 
 ![Excursion and horizontal speed](braking.png)
 

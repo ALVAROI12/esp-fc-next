@@ -218,10 +218,11 @@ def build():
         ["Safety: hold + landing", "Opt-in SITL; hardware pending",
          "Command loss: fixed-pose hold then descent; camera loss: level descent with independent local ToF. "
          "LAND stays latched through touchdown, even if commands return; terminal states block automatic rearm. "
-         "Nominal 1/4 kHz SITL: max descent 0.263 m/s, sampled touchdown approach 0.093-0.102 m/s; motors off at ground. "
+         "Nominal 1/4 kHz SITL: max descent 0.263 m/s, sampled touchdown approach 0.131-0.148 m/s; motors off at ground. "
          "Camera lost above the 1.3 m ToF range: bounded 6 s blind descent with thrust held at 0.97-0.99 x learned "
          "hover, so a +/-0.02 g unseen accel bias still lands (it climbed to 4 m and fell before). "
-         "Permanent loss of every height source is still a FAULT/motor stop, not safe landing."],
+         "Permanent loss of every height source still ends in FAULT (from 1 m: 0.45 m/s contact, then motor stop on the "
+         "ground at 6 s; before: 4.2 m/s fall), not safe landing."],
         ["Local flow braking", "SITL checks pass; hardware pending",
          "Healthy flow/range enables zero-velocity braking after camera loss instead of passive coasting. "
          "Nominal excursion 1.71-1.72 m -> 0.277-0.290 m; sampled stress worst 0.349 m at 1/4 kHz. "
@@ -247,7 +248,8 @@ def build():
          "safely; minimum separation 0.35 m. No inter-drone downwash; low battery is a voltage step, no discharge model."],
         ["1.9 G3 quality gate", "Met on host",
          "cppcheck and clang-tidy clean (make core-lint / core-tidy, CI); -Wall -Wextra on fc_core sources; "
-         "line coverage 80.8% of fc_step-reachable code (INDI/Mellinger excluded, planner not built on host)."],
+         "line coverage 80.8% of fc_step-reachable code (INDI/Mellinger excluded, planner not built on host); "
+         "review checklist (docs/review_checklist.md). Timing budget: fcTime logs on target, unmeasured until a board runs."],
     ], [1.35, 0.8, 4.85]), p(
         "4 kHz is a host/SITL configuration, not a measured ESP32-P4 runtime. The default images still use "
         "the existing ESP-Drone task loop; fc_step on target is opt-in and compile-checked only. Driver integration, CPU deadlines, Wi-Fi/camera contention and hardware "

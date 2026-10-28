@@ -221,11 +221,14 @@ the viewer scenario is `?scenario=failsafe`. `SitlDrone(..., safe_landing=True)`
 local ToF; `link_up`, `tracking_up` and `height_up` independently gate command, camera and range delivery.
 
 Baseline without local flow, seed-9 SITL at 1/4 kHz: controlled cases reach LANDED about 5.24-7.05 s after loss,
-max descent about 0.263 m/s, sampled final approach 0.093-0.102 m/s, and motor disarm at ground.
+max descent about 0.263 m/s, sampled final approach 0.131-0.148 m/s (the touchdown-dwell thrust ceiling
+adds about 0.04 m/s), and motor disarm at ground.
 Restored commands during LAND do not restart flight. Moving camera-only loss still produces
 about **1.7 m XY excursion**, rising to about **2.0 m** with the restored/jumped camera reference
 (combined loss about 1.3 m), so this is not collision-safe swarm flight.
-The all-height-loss cases instead stop motors around 1 m height and fall: a tested fault path,
+The all-height-loss cases (camera and ToF lost at 1 m) now blind-descend and touch down at about
+0.45 m/s; the 6 s budget then stops the motors on the ground (before: motor stop at 1 m, 4.2 m/s fall).
+It still ends in FAULT: a tested fault path,
 not a safe-landing pass. See the report for the exact cases, gates and sampled metrics.
 
 Review regressions also cover local-range expiry during the touchdown dwell (camera-height fallback
