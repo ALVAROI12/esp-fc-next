@@ -97,8 +97,10 @@ typedef enum {
  * roughly 0.2-0.6 m/s^2 (force ~ ratio^2) whatever the estimate believes, until the ToF is back in range. */
 #define FC_FAILSAFE_SINK_THRUST_MIN 0.97f
 #define FC_FAILSAFE_SINK_THRUST_MAX 0.99f
-/* The band stays on this long after a height source returns, while the drifted estimate converges. */
-#define FC_FAILSAFE_BLIND_SETTLE_MS 1000
+/* The band stays on this long after a height source returns, while the drifted estimate converges. Short:
+ * the band has no braking authority, and a +0.02 g bias arrives at ToF range sinking ~1 m/s (1 s braked only
+ * at 0.06 m from 4 m in SITL; 300 ms brakes by ~0.8 m, no climb at -0.02 g; a 1.05 ceiling climbed 0.6 m). */
+#define FC_FAILSAFE_BLIND_SETTLE_MS 300
 #define FC_FAILSAFE_FLOW_TIMEOUT_MS 100
 #define FC_FAILSAFE_FLOW_MIN_HEIGHT_M 0.12f
 /* Loaded cell voltage below this for FC_FAILSAFE_LOW_BATTERY_MS lands (safe mode); also refuses arming.
