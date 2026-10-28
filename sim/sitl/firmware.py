@@ -125,6 +125,8 @@ class FlightFirmware:
             "fc_param_set": (C.c_int, [C.c_char_p, C.c_char_p, C.c_double]),
             "fc_log_get": (C.c_int, [C.c_char_p, C.c_char_p, C.POINTER(C.c_double)]),
             "fc_vars_list": (C.c_size_t, [C.c_int, C.c_char_p, C.c_size_t]),
+            "fc_hl_packet": (C.c_int, [C.c_char_p, C.c_uint8]),
+            "fc_hl_step": (b, []),
         }
         for name, (res, args) in sig.items():
             fn = getattr(self._lib, name)
@@ -189,6 +191,14 @@ class FlightFirmware:
 
     def set_trajectory_setpoint(self, pos, vel, acc, yaw_deg: float = 0.0) -> None:
         self._lib.fc_set_trajectory_setpoint(*pos, *vel, *acc, yaw_deg)
+
+    def hl_packet(self, data: bytes) -> int:
+        """One CRTP high-level commander payload (port 8, as cflib/Crazyswarm2 send it); 0 = accepted."""
+        return int(self._lib.fc_hl_packet(data, len(data)))
+
+    def hl_step(self) -> bool:
+        """Forward the high-level planner's setpoint for this tick; False while the planner is stopped."""
+        return bool(self._lib.fc_hl_step())
 
     def push_position(self, x: float, y: float, z: float, std: float) -> bool:
         return bool(self._lib.fc_push_position(x, y, z, std))

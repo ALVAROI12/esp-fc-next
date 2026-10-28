@@ -20,7 +20,10 @@ the linker drops fc_step there; the real link check is the ESP32-S3 drone target
   timeout `nullSetpoint` is never mistaken for a packet. High-level commander setpoints
   (Crazyswarm2 takeoff/goTo/land; the commander returns them behind a stamp older than 2 s) are
   forwarded every tick while `crtpIsConnected()` (a CRTP packet within the link's activity window),
-  so a lost ground link falls through to fc_step's level / hold / land watchdog.
+  so a lost ground link falls through to fc_step's level / hold / land watchdog. The SITL flies the
+  same path: `host/src/fc_hl.c` compiles the subtree's high-level commander and planner into the SITL
+  library only, and `sim/tests/test_high_level.py` drives it with cflib's own `HighLevelCommander`
+  packets (protocol 4: takeoff, absolute/relative goTo with yaw, land, stop, link loss mid-goTo).
 - Arming follows the rising edge of `systemIsArmed()` (a level, the `forceArm` param), so a refused
   arm or a supervisor disarm is not retried automatically; toggle it to re-arm. The stabilizer
   emergency stop latches `fc_emergency_stop()` until reboot. fc_step drives the motors; `state` is

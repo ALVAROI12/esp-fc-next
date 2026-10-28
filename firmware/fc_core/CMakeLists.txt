@@ -84,10 +84,14 @@ add_library(fc_core_4k STATIC ${ALL_SOURCES})
 fc_configure(fc_core_4k)
 target_compile_definitions(fc_core_4k PUBLIC ${FC_4K_DEFINITIONS})
 
-add_library(fc_sitl SHARED ${ALL_SOURCES})
+# SITL only: the Crazyflie high-level commander and planner (Crazyswarm2 takeoff/goTo/land), see host/src/fc_hl.c.
+set(HL_SOURCES host/src/fc_hl.c ${CF}/modules/src/planner.c ${CF}/modules/src/pptraj.c ${CF}/modules/src/pptraj_compressed.c)
+set_source_files_properties(host/src/fc_hl.c PROPERTIES INCLUDE_DIRECTORIES "${CMAKE_CURRENT_LIST_DIR}/host/hl;${CF}/modules/src")
+
+add_library(fc_sitl SHARED ${ALL_SOURCES} ${HL_SOURCES})
 fc_configure(fc_sitl)
 target_compile_options(fc_sitl PRIVATE -O2)
-add_library(fc_sitl_4k SHARED ${ALL_SOURCES})
+add_library(fc_sitl_4k SHARED ${ALL_SOURCES} ${HL_SOURCES})
 fc_configure(fc_sitl_4k)
 target_compile_definitions(fc_sitl_4k PUBLIC ${FC_4K_DEFINITIONS})
 target_compile_options(fc_sitl_4k PRIVATE -O2)

@@ -143,6 +143,7 @@ class SitlDrone:
         self.command = np.zeros(4)
         self.tick = 0
         self.trajectory: Trajectory | None = None
+        self.high_level = False  # on-board high-level commander (Crazyswarm2) flies; fed by hl_packet()
         self.target: tuple[float, float, float, float] | None = None  # last sent x, y, z, yaw
         self.link_up = True
         self.tracking_up = True  # external position only; independent of command radio
@@ -231,6 +232,9 @@ class SitlDrone:
             self.target = (*sp_pos, sp_yaw)
             if self.link_up:
                 self.fw.set_trajectory_setpoint(sp_pos, sp_vel, sp_acc, sp_yaw)
+
+        if self.high_level and self.link_up:  # target/fc_runtime.c: only while crtpIsConnected()
+            self.fw.hl_step()
 
         ratios = self.fw.step(imu_gyro, imu_acc, int(self.tick * 1e6 * self.dt))
         self.command = np.array(ratios) / RATIO_FULL_SCALE
