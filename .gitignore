@@ -20,3 +20,6 @@ build/
 
 # Generated simulation viewer (make viewer)
 sim/reports/viewer/
+
+# Radio link group key (tools/provision_radio.py)
+secrets/

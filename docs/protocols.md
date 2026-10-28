@@ -73,7 +73,6 @@ broadcast, so the swarm status and swarm commands use an application-level envel
 - Link-loss timing on hardware. Both SPI ends build but have not run on a board.
 - ESP-Drone's `crtpRxTask` asserts (motor stop) if a CRTP port queue overflows. That is upstream behaviour for
   every link; a ground station flooding one port can trigger it.
-- A provisioning tool (the NVS layout is defined in section 5; `nvs_partition_gen.py` can write it).
 - Crazyswarm2 bridge (CRTP over UDP/ESP-NOW to the ground station).
 - Group key: every member can seal any message. CRTP is accepted only from sender id 0 (ground), so a buggy
   drone cannot command another, but a compromised drone can impersonate the ground. Per-sender keys fix that.
@@ -100,5 +99,6 @@ Code: `include/fc_radio.h`, `src/fc_radio.c` (portable, host-tested in `tests/te
   frames (no C5, CRC) and `seq` gaps, and sends one queued CRTP packet or IDLE. `isConnected` means a CRTP
   packet arrived within 1 s; C5 IDLE frames alone do not count. Host tests: `tests/test_c5_link.c`.
 - Provisioning: NVS namespace `fclink`: `key` (16-byte blob), `net` (u32), `id` (u8), `ctr` (u32, written by
-  the firmware). There is no default key. Without one the radio stays off; the P4 then sees no valid frames and its
+  the firmware). `tools/provision_radio.py --id N` builds `build/provision/radio-N.bin` (flash at 0x9000); the
+  group key is created once in git-ignored `secrets/link_key.hex`. There is no default key. Without one the radio stays off; the P4 then sees no valid frames and its
   command watchdog lands.

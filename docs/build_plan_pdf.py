@@ -240,7 +240,7 @@ def build():
          "self-check not yet run on a board. C5 bridge (fc_radio): envelope &lt;-&gt; SPI frame, ground-only commands, "
          "NVS-reserved counters (no nonce reuse across reboot); C5 image wires ESP-NOW + SPI slave. P4 side: "
          "CONFIG_TRANSPORT_C5_SPI CRTP link (500 Hz SPI master, make flight-c5link, CI). Both ends host-tested and "
-         "compile-checked; not run on a board. Not yet: provisioning tool, Crazyswarm2 bridge."],
+         "compile-checked; not run on a board. Provisioning: tools/provision_radio.py. Not yet: Crazyswarm2 bridge."],
         ["fc_step on target", "Builds; never flown",
          "CONFIG_ESPFC_FC_STEP runs fc_step in ESP-Drone's stabilizer task (make flight-fcstep, CI on ESP32-S3: +7 KB). "
          "Mocap/pose/ToF/flow reach it through a static queue; only new commander packets feed its watchdog; host "
