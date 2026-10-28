@@ -19,8 +19,9 @@ Fixed 64-byte SPI transaction. The P4 is master and clocks one frame each way pe
 | 5+len | 2 | crc | CRC-16/CCITT-FALSE (poly 0x1021, init 0xFFFF) over bytes 0..4+len |
 | ... | | zero | tail is zero |
 
-The decoder rejects short buffers, wrong magic, unknown type, a length above the type's maximum, and a CRC
-mismatch, in that order. A rejected frame is dropped and counted; it never reaches the flight loop. CRC-16
+The decoder rejects short buffers, wrong magic, unknown type, a length above the type's maximum, a CRC
+mismatch and a non-zero tail, in that order. The tail check matters on the serial stream: a frame that lost
+only tail bytes still has a valid CRC and would otherwise swallow the start of the next frame. A rejected frame is dropped and counted; it never reaches the flight loop. CRC-16
 detects all single-bit and odd-count errors and all bursts up to 16 bits. The chip-to-chip link is not
 authenticated: both chips are on the same board.
 
@@ -73,7 +74,7 @@ broadcast, so the swarm status and swarm commands use an application-level envel
 - Link-loss timing on hardware. Both SPI ends build but have not run on a board.
 - ESP-Drone's `crtpRxTask` asserts (motor stop) if a CRTP port queue overflows. That is upstream behaviour for
   every link; a ground station flooding one port can trigger it.
-- Crazyswarm2 bridge (CRTP over UDP/ESP-NOW to the ground station).
+- Crazyswarm2 / cflib driver on top of `tools/espfc_link.py` (the frame link to the ground C5 exists).
 - Group key: every member can seal any message. CRTP is accepted only from sender id 0 (ground), so a buggy
   drone cannot command another, but a compromised drone can impersonate the ground. Per-sender keys fix that.
 
@@ -96,6 +97,10 @@ Code: `include/fc_radio.h`, `src/fc_radio.c` (portable, host-tested in `tests/te
 - Counter persistence: counters are reserved in blocks of 4096 and stored in NVS before use. A reboot resumes at
   the stored limit, so it never reuses a nonce. Sending stalls instead of overrunning the reservation. At 50 Hz a
   block lasts 80 s, about 1100 NVS writes per day. When the 32-bit space is spent it stops sending (rekey).
+- Ground station (id 0): the same frames stream back to back over USB Serial/JTAG to the PC instead of SPI.
+  `fc_link_stream_push` (C) and `tools/espfc_link.py` (PC: `GroundLink.send_crtp(dest, packet)`, `receive()`)
+  resynchronize one byte at a time, so console text on the port is skipped. Tests: `test_link.c` and
+  `sim/tests/test_ground_link.py`, which cross-checks the Python codec against the firmware one.
 - Transport: the P4 is SPI master and polls; each transaction carries one frame each way, IDLE when there is
   nothing to deliver. ESP-NOW receives go through a 16-deep queue (drop when full); all envelope work runs in
   one task. SPI pins and the Wi-Fi channel are Kconfig placeholders until the board exists.

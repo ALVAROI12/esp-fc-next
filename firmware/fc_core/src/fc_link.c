@@ -48,6 +48,9 @@ fc_link_status_t fc_link_decode(const uint8_t *buf, size_t n, fc_link_frame_t *o
     if (len > maxLen[buf[1]]) return FC_LINK_ERR_LEN;
     if (n < FC_LINK_HEADER_SIZE + len + FC_LINK_CRC_SIZE) return FC_LINK_ERR_SHORT;
     if (get16(buf + FC_LINK_HEADER_SIZE + len) != fc_link_crc16(buf, FC_LINK_HEADER_SIZE + len)) return FC_LINK_ERR_CRC;
+    for (size_t i = FC_LINK_HEADER_SIZE + len + FC_LINK_CRC_SIZE; i < n && i < FC_LINK_FRAME_SIZE; i++) {
+        if (buf[i]) return FC_LINK_ERR_TAIL;
+    }
     out->type = buf[1];
     out->seq = get16(buf + 2);
     out->len = len;
@@ -105,4 +108,20 @@ void fc_link_status_unpack(const uint8_t in[FC_LINK_STATUS_SIZE], fc_link_status
     }
     m->battery_mv = get16(in + 14);
     m->time_ms = get32(in + 16);
+}
+
+bool fc_link_stream_push(fc_link_stream_t *s, uint8_t byte, uint8_t frame[FC_LINK_FRAME_SIZE])
+{
+    fc_link_frame_t f;
+    s->buf[s->n++] = byte;
+    if (s->n < FC_LINK_FRAME_SIZE) return false;
+    if (fc_link_decode(s->buf, FC_LINK_FRAME_SIZE, &f) == FC_LINK_OK) {
+        memcpy(frame, s->buf, FC_LINK_FRAME_SIZE);
+        s->n = 0;
+        return true;
+    }
+    memmove(s->buf, s->buf + 1, FC_LINK_FRAME_SIZE - 1u); /* ponytail: O(64) per byte; fine at serial rates */
+    s->n--;
+    s->skipped++;
+    return false;
 }

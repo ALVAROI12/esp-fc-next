@@ -57,6 +57,8 @@ static void test_decode_rejects_each_corruption(void)
     TEST_ASSERT_EQUAL(FC_LINK_ERR_TYPE, fc_link_decode(bad, sizeof bad, &g));
     memcpy(bad, buf, sizeof bad); bad[4] = 255;
     TEST_ASSERT_EQUAL(FC_LINK_ERR_LEN, fc_link_decode(bad, sizeof bad, &g));
+    memcpy(bad, buf, sizeof bad); bad[FC_LINK_FRAME_SIZE - 1] = 1; /* spec: the unused tail is zero */
+    TEST_ASSERT_EQUAL(FC_LINK_ERR_TAIL, fc_link_decode(bad, sizeof bad, &g));
     for (unsigned i = 1; i < FC_LINK_HEADER_SIZE + f.len + FC_LINK_CRC_SIZE; i++) {
         if (i == 1 || i == 4) continue; /* type/len flips are caught by the checks above */
         memcpy(bad, buf, sizeof bad); bad[i] ^= 0x40;
@@ -110,6 +112,46 @@ static void test_status_pack_rejects_nan_and_out_of_range(void)
     TEST_ASSERT_FALSE(fc_link_status_pack(&m, buf));
 }
 
+/* Ground serial link: frames survive leading console text, a corrupted frame and a lost byte. */
+static void test_stream_resynchronizes_after_noise_corruption_and_loss(void)
+{
+    uint8_t a[FC_LINK_FRAME_SIZE], b[FC_LINK_FRAME_SIZE], c[FC_LINK_FRAME_SIZE], out[FC_LINK_FRAME_SIZE];
+    fc_link_frame_t fa = {.type = FC_LINK_CRTP, .seq = 1, .len = 3, .payload = {0x7C, 1, 2}};
+    fc_link_frame_t fb = {.type = FC_LINK_CRTP_PEER, .seq = 2, .len = 2, .payload = {4, 0x5C}};
+    fc_link_frame_t fc = {.type = FC_LINK_IDLE, .seq = 3};
+    TEST_ASSERT_TRUE(fc_link_encode(&fa, a) && fc_link_encode(&fb, b) && fc_link_encode(&fc, c));
+    uint8_t wire[16 + 5 * FC_LINK_FRAME_SIZE];
+    size_t n = 0;
+    memcpy(wire + n, "I (12) radio: \xA5\n", 16); /* console text, including a magic byte */
+    n += 16;
+    memcpy(wire + n, a, sizeof a);
+    n += sizeof a;
+    memcpy(wire + n, b, sizeof b);
+    wire[n + 6] ^= 1; /* b corrupted in transit */
+    n += sizeof b;
+    memcpy(wire + n, c + 1, sizeof c - 1); /* c lost its first byte */
+    n += sizeof c - 1;
+    memcpy(wire + n, c, 40); /* c lost only tail bytes: header and CRC intact */
+    n += 40;
+    memcpy(wire + n, a, sizeof a);
+    n += sizeof a;
+
+    fc_link_stream_t s = {0};
+    unsigned got = 0;
+    uint16_t seqs[4];
+    for (size_t i = 0; i < n; i++) {
+        if (!fc_link_stream_push(&s, wire[i], out)) continue;
+        fc_link_frame_t f;
+        TEST_ASSERT_EQUAL(FC_LINK_OK, fc_link_decode(out, sizeof out, &f));
+        TEST_ASSERT_LESS_THAN(4, got);
+        seqs[got++] = f.seq;
+    }
+    TEST_ASSERT_EQUAL(2, got); /* a, then a again: b and both truncated copies of c are skipped */
+    TEST_ASSERT_EQUAL(1, seqs[0]);
+    TEST_ASSERT_EQUAL(1, seqs[1]);
+    TEST_ASSERT_EQUAL(n - 2 * FC_LINK_FRAME_SIZE, s.skipped);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -120,5 +162,6 @@ int main(void)
     RUN_TEST(test_replay_window_accepts_once_and_reorders);
     RUN_TEST(test_status_round_trip_quantizes_to_mm);
     RUN_TEST(test_status_pack_rejects_nan_and_out_of_range);
+    RUN_TEST(test_stream_resynchronizes_after_noise_corruption_and_loss);
     return UNITY_END();
 }

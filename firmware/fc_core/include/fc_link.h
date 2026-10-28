@@ -37,6 +37,7 @@ typedef enum {
     FC_LINK_ERR_TYPE,
     FC_LINK_ERR_LEN,
     FC_LINK_ERR_CRC,
+    FC_LINK_ERR_TAIL, /* non-zero byte after the CRC: catches a frame that lost tail bytes in a stream */
 } fc_link_status_t;
 
 typedef struct {
@@ -52,6 +53,18 @@ uint16_t fc_link_crc16(const uint8_t *data, size_t n); /* CRC-16/CCITT-FALSE */
 bool fc_link_encode(const fc_link_frame_t *frame, uint8_t out[FC_LINK_FRAME_SIZE]);
 /* Accepts any buffer; out is only valid when FC_LINK_OK is returned. */
 fc_link_status_t fc_link_decode(const uint8_t *buf, size_t n, fc_link_frame_t *out);
+
+/* ---- Byte-stream framing (ground C5 <-> PC over USB serial) ----
+ * The same 64-byte frames back to back. A receiver slides one byte at a time until magic and CRC check out,
+ * so it resynchronizes after lost bytes and skips interleaved console text. */
+typedef struct {
+    uint8_t buf[FC_LINK_FRAME_SIZE];
+    uint8_t n;
+    uint32_t skipped; /* bytes discarded while searching for a frame */
+} fc_link_stream_t;
+
+/* Feeds one byte; returns true when frame holds a complete, valid frame (raw bytes, ready to decode). */
+bool fc_link_stream_push(fc_link_stream_t *s, uint8_t byte, uint8_t frame[FC_LINK_FRAME_SIZE]);
 
 /* ---- Anti-replay window for 32-bit message counters (one per peer) ---- */
 typedef struct {
