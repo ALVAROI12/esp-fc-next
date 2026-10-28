@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "commander.h"
+#include "crtp.h"
 #include "fc_host.h"
 #include "fc_runtime.h"
 #include "fc_step.h"
@@ -27,6 +28,8 @@ void commanderGetSetpoint(setpoint_t *setpoint, const state_t *state)
 bool systemIsArmed(void) { return armedFake; }
 static float batteryFake;
 float pmGetBatteryVoltage(void) { return batteryFake; }
+static bool linkFake;
+bool crtpIsConnected(void) { return linkFake; }
 
 /* ---- helpers ---- */
 static sensorData_t level;
@@ -61,6 +64,7 @@ void setUp(void)
     commanded.position.z = 1;
     armedFake = false;
     batteryFake = 0; /* power management not initialised: no reading */
+    linkFake = true;
     memset(&level, 0, sizeof(level));
     level.acc.z = 1;
     fcRuntimeInit();
@@ -102,11 +106,38 @@ static void test_only_new_setpoints_refresh_the_command_watchdog(void)
     TEST_ASSERT_EQUAL(modeDisable, fc_active_setpoint()->mode.x); /* stale packet: level, no XY hold */
     /* After its own timeout the commander hands back nullSetpoint (timestamp 0) or a back-dated copy
      * (commanderNotifySetpointsStop): a changed timestamp, but not a new packet. */
-    commanded.timestamp = 0;
+    setpoint_t packet = commanded;
+    memset(&commanded, 0, sizeof(commanded));
     for (unsigned i = 0; i < 10; i++) tick(false);
     TEST_ASSERT_EQUAL(modeDisable, fc_active_setpoint()->mode.x);
+    commanded = packet;
     commanded.timestamp = rtosTick - pdMS_TO_TICKS(600);
     for (unsigned i = 0; i < 10; i++) tick(false);
+    TEST_ASSERT_EQUAL(modeDisable, fc_active_setpoint()->mode.x);
+}
+
+/* Crazyswarm2 flies the on-board high-level commander: commanderGetSetpoint returns the trajectory setpoint
+ * behind the last (more than 2 s old) packet stamp. It is forwarded while the ground link is alive; the
+ * commander's nullSetpoint (planner stopped or commander.enHighLevel off) is not. */
+static void test_high_level_setpoints_are_forwarded_while_the_link_is_alive(void)
+{
+    ready();
+    rtosTick += pdMS_TO_TICKS(3000); /* last low-level packet (stamp 0) is long gone */
+    const unsigned stale = FC_MS_TO_TICKS(FC_SETPOINT_TIMEOUT_STABILIZE_MS + 100);
+    for (unsigned i = 0; i < stale; i++) tick(false); /* commanded = HL trajectory point at z = 1 */
+    TEST_ASSERT_EQUAL(modeAbs, fc_active_setpoint()->mode.x);
+    TEST_ASSERT_EQUAL_FLOAT(1, fc_active_setpoint()->position.z);
+
+    setpoint_t hl = commanded;
+    memset(&commanded, 0, sizeof(commanded)); /* nullSetpoint */
+    for (unsigned i = 0; i < stale; i++) tick(false);
+    TEST_ASSERT_EQUAL(modeDisable, fc_active_setpoint()->mode.x); /* fc_step's own watchdog, not the null */
+    TEST_ASSERT_EQUAL(modeAbs, fc_active_setpoint()->mode.z);
+
+    commanded = hl;
+    tick(false);
+    linkFake = false; /* ground lost: the on-board trajectory alone must not keep the drone flying */
+    for (unsigned i = 0; i < stale; i++) tick(false);
     TEST_ASSERT_EQUAL(modeDisable, fc_active_setpoint()->mode.x);
 }
 
@@ -199,6 +230,7 @@ int main(void)
     UNITY_BEGIN();
     RUN_TEST(test_measurements_from_other_tasks_reach_fc_step);
     RUN_TEST(test_only_new_setpoints_refresh_the_command_watchdog);
+    RUN_TEST(test_high_level_setpoints_are_forwarded_while_the_link_is_alive);
     RUN_TEST(test_arm_follows_system_and_emergency_stop_latches);
     RUN_TEST(test_arm_is_edge_triggered);
     RUN_TEST(test_battery_voltage_reaches_fc_step);

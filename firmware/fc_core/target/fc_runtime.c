@@ -10,6 +10,7 @@
 #include "task.h"
 
 #include "commander.h"
+#include "crtp.h"
 #include "fc_step.h"
 #include "log.h"
 #include "param.h"
@@ -63,12 +64,17 @@ void fcRuntimeStep(const sensorData_t *sensors, setpoint_t *setpoint, state_t *s
 
     /* Only new packets refresh fc_step's command watchdog. After its own timeouts the commander returns
      * nullSetpoint (timestamp 0) or a back-dated copy: a changed timestamp but no packet, so also require
-     * the stamp to be recent. ponytail: high-level commander setpoints carry no stamp and are never
-     * forwarded; fc_step mode needs streamed low-level setpoints (cmdPosition / cmdFullState). */
+     * the stamp to be recent. Past its 2 s shutdown timeout it returns the high-level commander's
+     * trajectory point (Crazyswarm2 takeoff/goTo/land) behind the old stamp, or nullSetpoint (mode.z
+     * disabled) when that planner is stopped or commander.enHighLevel is off. The planner runs on board
+     * without a ground link, so forward its points only while the link sees packets (Crazyswarm2 streams
+     * mocap); otherwise fc_step's watchdog levels, holds and lands. */
     commanderGetSetpoint(setpoint, state);
-    if (setpoint->timestamp != lastSetpointTimestamp &&
-        xTaskGetTickCount() - setpoint->timestamp <= pdMS_TO_TICKS(FC_SETPOINT_TIMEOUT_STABILIZE_MS)) {
+    uint32_t age = xTaskGetTickCount() - setpoint->timestamp;
+    if (setpoint->timestamp != lastSetpointTimestamp && age <= pdMS_TO_TICKS(FC_SETPOINT_TIMEOUT_STABILIZE_MS)) {
         lastSetpointTimestamp = setpoint->timestamp;
+        fc_set_setpoint(setpoint);
+    } else if (age > pdMS_TO_TICKS(FC_SETPOINT_TIMEOUT_SHUTDOWN_MS) && setpoint->mode.z == modeAbs && crtpIsConnected()) {
         fc_set_setpoint(setpoint);
     }
 

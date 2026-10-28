@@ -243,7 +243,7 @@ def build():
          "compile-checked; not run on a board. CRTP is addressed (drone id or all, inside the ciphertext): a ground command no longer reaches every drone. Ground C5 (id 0) streams the same frames to the PC over USB serial (tools/espfc_link.py, cross-checked against the firmware codec). Provisioning: tools/provision_radio.py. cflib driver tools/espfc_cflib.py (espfc://&lt;id&gt;@&lt;port&gt;); Crazyswarm2 needs a 2-line register() patch, untried."],
         ["fc_step on target", "Builds; never flown",
          "CONFIG_ESPFC_FC_STEP runs fc_step in ESP-Drone's stabilizer task (make flight-fcstep, CI on ESP32-S3: +7 KB). "
-         "Mocap/pose/ToF/flow reach it through a static queue; only new commander packets feed its watchdog; host "
+         "Mocap/pose/ToF/flow reach it through a static queue; only new commander packets (and high-level commander points while the link is alive) feed its watchdog; host "
          "tests cover the glue; the driver LPF is compiled out so IMU samples are filtered once. P4 image is still the "
          "diagnostic profile (no board yet)."],
         ["1.8 Swarm simulation", "SITL checks pass",
