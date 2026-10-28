@@ -154,6 +154,18 @@ static void test_battery_voltage_reaches_fc_step(void)
     TEST_ASSERT_EQUAL_FLOAT(3.1f, (float)safety_log("batteryV"));
 }
 
+/* The host clock only moves between ticks, so fc_step costs 0 us here; the counters must still be sane. */
+static void test_step_timing_counters(void)
+{
+    ready();
+    double us, maxUs, overruns;
+    TEST_ASSERT_EQUAL(FC_VAR_OK, fc_log_get("fcTime", "stepUs", &us));
+    TEST_ASSERT_EQUAL(FC_VAR_OK, fc_log_get("fcTime", "stepMaxUs", &maxUs));
+    TEST_ASSERT_EQUAL(FC_VAR_OK, fc_log_get("fcTime", "overruns", &overruns));
+    TEST_ASSERT_TRUE(us <= maxUs);
+    TEST_ASSERT_EQUAL(0, (int)overruns);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -161,5 +173,6 @@ int main(void)
     RUN_TEST(test_only_new_setpoints_refresh_the_command_watchdog);
     RUN_TEST(test_arm_follows_system_and_emergency_stop_latches);
     RUN_TEST(test_battery_voltage_reaches_fc_step);
+    RUN_TEST(test_step_timing_counters);
     return UNITY_END();
 }

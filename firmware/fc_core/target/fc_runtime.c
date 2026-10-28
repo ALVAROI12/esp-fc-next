@@ -10,8 +10,10 @@
 
 #include "commander.h"
 #include "fc_step.h"
+#include "log.h"
 #include "pm_esplane.h"
 #include "system.h"
+#include "usec_time.h"
 
 enum { MEAS_POSITION, MEAS_TOF, MEAS_FLOW };
 typedef struct {
@@ -25,6 +27,7 @@ static uint8_t queueBuffer[FC_RUNTIME_QUEUE_LEN * sizeof(meas_t)];
 static QueueHandle_t queue;
 static uint32_t lastSetpointTimestamp;
 static uint32_t batteryTick;
+static uint32_t stepUs, stepMaxUs, overruns; /* timing budget (G3): fc_step cost per tick */
 
 void fcRuntimeInit(void)
 {
@@ -74,6 +77,16 @@ void fcRuntimeStep(const sensorData_t *sensors, setpoint_t *setpoint, state_t *s
      * (sensors_mpu6050_hm5883L_ms5611.c) because fc_step applies the same 80/30 Hz filters. */
     const float gyro[3] = {sensors->gyro.x, sensors->gyro.y, sensors->gyro.z};
     const float acc[3] = {sensors->acc.x, sensors->acc.y, sensors->acc.z};
+    uint64_t start = usecTimestamp();
     fc_step(gyro, acc);
+    stepUs = (uint32_t)(usecTimestamp() - start);
+    if (stepUs > stepMaxUs) stepMaxUs = stepUs;
+    if (stepUs > 1000000u / FC_STEP_RATE_HZ) overruns++;
     *state = *fc_state();
 }
+
+LOG_GROUP_START(fcTime)
+LOG_ADD(LOG_UINT32, stepUs, &stepUs)
+LOG_ADD(LOG_UINT32, stepMaxUs, &stepMaxUs)
+LOG_ADD(LOG_UINT32, overruns, &overruns)
+LOG_GROUP_STOP(fcTime)

@@ -22,6 +22,9 @@ the linker drops fc_step there; the real link check is the ESP32-S3 drone target
 
 - The ESP-Drone sensor driver keeps bias, scale and gravity alignment but skips its 80/30 Hz LPF in this
   mode; fc_step applies the same filters, so samples are filtered once.
+- Battery: `pmGetBatteryVoltage()` is pushed at 10 Hz as cell voltage (1S assumed).
+- Timing budget (G3): log group `fcTime` reports `stepUs` (last fc_step call), `stepMaxUs` and
+  `overruns` (calls longer than one tick). Read it with cfclient on the first board run.
 
 The 4 kHz configuration remains
 host/SITL only. A passing P4 build does not validate driver sampling, scheduling deadlines, or
