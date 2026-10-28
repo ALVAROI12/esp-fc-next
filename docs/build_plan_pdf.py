@@ -236,6 +236,10 @@ def build():
          "anti-replay window; unit tests + libFuzzer (make link-fuzz, 1 h run: 4.3 B inputs, no crash); builds on "
          "the C5 toolchain. AES-128-CCM envelope built on IDF mbedtls 3.6.7 with RFC 3610 vector tests; C5 boot "
          "self-check not yet run on a board; no SPI/ESP-NOW transport yet."],
+        ["fc_step on target", "Builds; never flown",
+         "CONFIG_ESPFC_FC_STEP runs fc_step in ESP-Drone's stabilizer task (make flight-fcstep, CI on ESP32-S3: +7 KB). "
+         "Mocap/pose/ToF/flow reach it through a static queue; only new commander packets feed its watchdog; host "
+         "tests cover the glue. P4 image is still the diagnostic profile (no board yet). Known gap: double IMU filtering."],
         ["1.8 Swarm simulation", "SITL checks pass",
          "make swarm: four firmware copies in lockstep, altitude layers 1.0-2.05 m, square formation and diagonal "
          "swap. Nominal, link loss and camera dropout (in formation and mid-swap, top layer) all land safely; "
@@ -244,8 +248,8 @@ def build():
          "cppcheck and clang-tidy clean (make core-lint / core-tidy, CI); -Wall -Wextra on fc_core sources; "
          "line coverage 80.8% of fc_step-reachable code (INDI/Mellinger excluded, planner not built on host)."],
     ], [1.35, 0.8, 4.85]), p(
-        "4 kHz is a host/SITL configuration, not a measured ESP32-P4 runtime. The production P4 image still uses "
-        "the existing ESP-Drone task loop. Driver integration, CPU deadlines, Wi-Fi/camera contention and hardware "
+        "4 kHz is a host/SITL configuration, not a measured ESP32-P4 runtime. The default images still use "
+        "the existing ESP-Drone task loop; fc_step on target is opt-in and compile-checked only. Driver integration, CPU deadlines, Wi-Fi/camera contention and hardware "
         "flight are unvalidated. Dynamic-notch/RPM filtering was added in Task 1.6b as a simulation-only model.", NOTE), p(
         "Task 1.6b is a synthetic stress model, not measured vibration. It adds a gyro artifact only, not frame "
         "resonance or body torque. The notch reduces high-frequency gyro and motor-command activity but did not improve "

@@ -1,0 +1,2 @@
+# ESP-FC Next: P4 image with the portable fc_step runtime (make flight-fcstep). Experimental, never flown.
+CONFIG_ESPFC_FC_STEP=y

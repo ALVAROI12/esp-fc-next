@@ -145,6 +145,14 @@ menu "ESPDrone Config"
             default 1024 if IDF_TARGET_ESP32S3
             default 1024 if TARGET_PORTABLE_SAFE
 
+        config ESPFC_FC_STEP
+            bool "ESP-FC Next: run the portable fc_step flight runtime (experimental, never flown)"
+            default n
+            help
+                The stabilizer task calls fc_step (synchronous Kalman, supervisor, controller, mixer) instead of
+                ESP-Drone's estimator/commander/controller pipeline. Position, pose, ToF and flow measurements
+                are routed to it. Simulation-validated only; no hardware timing or flight validation yet.
+
     endmenu
 
     menu "buzzer"

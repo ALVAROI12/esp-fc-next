@@ -27,11 +27,13 @@ jobs:
         run: sudo apt-get install -y cppcheck && make core-lint
       - name: Static analysis (clang-tidy)
         run: sudo apt-get install -y clang-tidy && make -o core-test core-tidy CLANG_TIDY=clang-tidy
-      - name: Link codec fuzz smoke (60 s)
+      - name: Link codec + AES-CCM envelope fuzz smoke (60 s each)
         run: |
-          cmake -S firmware/fc_core -B build/fuzz -DFC_FUZZ=ON -DCMAKE_C_COMPILER=clang
-          cmake --build build/fuzz --target fuzz_link
+          cmake -S firmware/fc_core -B build/fuzz -DFC_FUZZ=ON -DCMAKE_C_COMPILER=clang \
+            -DFC_MBEDTLS_DIR="$PWD/build/mbedtls"
+          cmake --build build/fuzz --target fuzz_link fuzz_link_aead
           build/fuzz/fuzz_link -max_total_time=60
+          build/fuzz/fuzz_link_aead -max_total_time=60
       - name: Coverage
         run: |
           pipx install gcovr
@@ -71,7 +73,7 @@ jobs:
           cat "$RUNNER_TEMP/flow_braking/README.md" >> "$GITHUB_STEP_SUMMARY"
 
   firmware:
-    name: ${{ matrix.project }} (${{ matrix.target }})
+    name: ${{ matrix.project }} (${{ matrix.target }}${{ matrix.variant }})
     strategy:
       fail-fast: false
       matrix:
@@ -80,6 +82,10 @@ jobs:
             target: esp32p4
           - project: flight
             target: esp32s3
+          - project: flight # stabilizer task runs fc_step (CONFIG_ESPFC_FC_STEP); link check
+            target: esp32s3
+            variant: -fcstep
+            defaults: sdkconfig.defaults;../fc_core/target/sdkconfig.fc_step
           - project: radio
             target: esp32c5
     runs-on: ubuntu-latest
@@ -91,15 +97,16 @@ jobs:
         working-directory: firmware/${{ matrix.project }}
         run: |
           . "${IDF_PATH}/export.sh"
-          idf.py -B build-${{ matrix.target }} \
-            -D SDKCONFIG=build-${{ matrix.target }}/sdkconfig \
+          idf.py -B build-${{ matrix.target }}${{ matrix.variant }} \
+            -D SDKCONFIG=build-${{ matrix.target }}${{ matrix.variant }}/sdkconfig \
             -D IDF_TARGET=${{ matrix.target }} \
+            ${{ matrix.defaults && format('-D "SDKCONFIG_DEFAULTS={0}"', matrix.defaults) || '' }} \
             build
       - name: Report image size
         shell: bash
         working-directory: firmware/${{ matrix.project }}
         run: |
           . "${IDF_PATH}/export.sh"
-          idf.py -B build-${{ matrix.target }} \
-            -D SDKCONFIG=build-${{ matrix.target }}/sdkconfig \
+          idf.py -B build-${{ matrix.target }}${{ matrix.variant }} \
+            -D SDKCONFIG=build-${{ matrix.target }}${{ matrix.variant }}/sdkconfig \
             size

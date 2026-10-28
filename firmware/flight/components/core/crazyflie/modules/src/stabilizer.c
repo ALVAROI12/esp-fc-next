@@ -54,6 +54,9 @@
 #include "debug_cf.h"
 #include "static_mem.h"
 #include "rateSupervisor.h"
+#ifdef CONFIG_ESPFC_FC_STEP
+#include "fc_runtime.h" /* ESP-FC Next: portable fc_step runtime */
+#endif
 
 static bool isInit;
 static bool emergencyStop = false;
@@ -200,6 +203,9 @@ void stabilizerInit(StateEstimatorType estimator)
   controllerInit(ControllerTypeAny);
   powerDistributionInit();
   sitAwInit();
+#ifdef CONFIG_ESPFC_FC_STEP
+  fcRuntimeInit(); /* ESP-FC Next */
+#endif
   //collisionAvoidanceInit();
   estimatorType = getStateEstimator();
   controllerType = getControllerType();
@@ -289,6 +295,14 @@ static void stabilizerTask(void* param)
       sensorsAcquire(&sensorData, tick);
       testProps(&sensorData);
     } else {
+#ifdef CONFIG_ESPFC_FC_STEP
+      /* ESP-FC Next: fc_step owns estimator, setpoint watchdog, failsafe, controller and mixer. */
+      sensorsAcquire(&sensorData, tick);
+      fcRuntimeStep(&sensorData, &setpoint, &state, emergencyStop);
+      compressState();
+      compressSetpoint();
+      checkEmergencyStopTimeout();
+#else
       // allow to update estimator dynamically
       if (getStateEstimator() != estimatorType) {
         stateEstimatorSwitchTo(estimatorType);
@@ -319,6 +333,7 @@ static void stabilizerTask(void* param)
       } else {
         powerDistribution(&control);
       }
+#endif
 
       //TODO: Log data to uSD card if configured
       /*if (usddeckLoggingEnabled()

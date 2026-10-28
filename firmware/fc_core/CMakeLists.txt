@@ -114,6 +114,13 @@ if(FC_FUZZ)
     target_compile_options(fuzz_link PRIVATE -g -O1 -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=all)
     target_link_options(fuzz_link PRIVATE -fsanitize=fuzzer,address,undefined)
     target_link_libraries(fuzz_link PRIVATE m)
+    if(FC_MBEDTLS_DIR) # mbedcrypto comes from tests/CMakeLists.txt
+        add_executable(fuzz_link_aead tests/fuzz_link_aead.c src/fc_link_aead.c src/fc_link.c)
+        target_include_directories(fuzz_link_aead PRIVATE include)
+        target_compile_options(fuzz_link_aead PRIVATE -g -O1 -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=all)
+        target_link_options(fuzz_link_aead PRIVATE -fsanitize=fuzzer,address,undefined)
+        target_link_libraries(fuzz_link_aead PRIVATE mbedcrypto)
+    endif()
 endif()
 
 # The SITL turns this off so its configure step needs no network (Unity is fetched from GitHub).

@@ -1,7 +1,7 @@
 # ESP-FC Next link protocols (Task 1.7)
 
 Code: `firmware/fc_core/include/fc_link.h`, `firmware/fc_core/src/fc_link.c` (portable C, built on host,
-P4 and C5). Radio envelope: `fc_link_aead.h/.c` (section 3). Tests: `tests/test_link.c`. Fuzzing: `make link-fuzz` (libFuzzer + ASan/UBSan).
+P4 and C5). Radio envelope: `fc_link_aead.h/.c` (section 3). Tests: `tests/test_link.c`. Fuzzing: `make link-fuzz` (libFuzzer + ASan/UBSan; 1 h: 4.32 B inputs, no crash) and `make link-fuzz FUZZ_TARGET=fuzz_link_aead` (arbitrary bytes never open; sealed input opens once, bit flips rejected; 1 h: 83.5 M inputs, no crash).
 
 All multi-byte fields are little-endian. No packed structs cross the wire; every field is written byte by byte.
 

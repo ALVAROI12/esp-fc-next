@@ -17,7 +17,7 @@ COVERAGE_UNREACHABLE := --exclude '.*/controller_indi\.c' --exclude '.*/position
 COVERAGE_FILTERS := --include-internal-functions --filter 'firmware/flight/components/core/' \
 	--filter 'firmware/fc_core/src/' --filter 'firmware/fc_core/host/' $(COVERAGE_UNREACHABLE)
 
-.PHONY: all flight radio core-test core-coverage sim-setup sim-test g1 vibration failsafe flow-braking swarm link-fuzz core-lint core-tidy mbedtls-src viewer pdf clean
+.PHONY: all flight flight-fcstep radio core-test core-coverage sim-setup sim-test g1 vibration failsafe flow-braking swarm link-fuzz core-lint core-tidy mbedtls-src viewer pdf clean
 
 all: flight radio core-test
 
@@ -50,11 +50,13 @@ core-coverage:
 # libFuzzer run of the P4<->C5 link codec (Task 1.7 gate: 1 h without crashes). FUZZ_SECONDS=60 for a smoke run.
 FUZZ_SECONDS ?= 3600
 FUZZ_CC ?= $(shell [ -x /opt/homebrew/opt/llvm/bin/clang ] && echo /opt/homebrew/opt/llvm/bin/clang || echo clang)
-link-fuzz:
-	cmake -S firmware/fc_core -B build/fuzz -G Ninja -DFC_FUZZ=ON -DCMAKE_C_COMPILER=$(FUZZ_CC)
-	cmake --build build/fuzz --target fuzz_link
-	mkdir -p build/fuzz/corpus
-	build/fuzz/fuzz_link -max_total_time=$(FUZZ_SECONDS) -print_final_stats=1 build/fuzz/corpus
+FUZZ_TARGET ?= fuzz_link
+link-fuzz: $(MBEDTLS_DIR)/CMakeLists.txt
+	cmake -S firmware/fc_core -B build/fuzz -G Ninja -DFC_FUZZ=ON -DCMAKE_C_COMPILER=$(FUZZ_CC) \
+		-DFC_MBEDTLS_DIR=$(CURDIR)/$(MBEDTLS_DIR)
+	cmake --build build/fuzz --target $(FUZZ_TARGET)
+	mkdir -p build/fuzz/corpus-$(FUZZ_TARGET)
+	build/fuzz/$(FUZZ_TARGET) -max_total_time=$(FUZZ_SECONDS) -print_final_stats=1 -artifact_prefix=build/fuzz/ build/fuzz/corpus-$(FUZZ_TARGET)
 
 # G3 static analysis of ESP-FC Next sources (non-zero exit on any finding).
 CF := firmware/flight/components
@@ -65,7 +67,7 @@ core-lint:
 		-I firmware/fc_core/include -I firmware/fc_core/src -I firmware/fc_core/host/include \
 		-I $(CF)/core/crazyflie/modules/interface -I $(CF)/core/crazyflie/utils/interface \
 		-I $(CF)/core/crazyflie/hal/interface -I $(CF)/config/include \
-		firmware/fc_core/src firmware/fc_core/host/src
+		-I firmware/fc_core/tests/shim firmware/fc_core/src firmware/fc_core/host/src firmware/fc_core/target
 
 # G3 clang-tidy of ESP-FC Next sources: path-sensitive analyzer + bug-prone patterns, warnings are errors.
 # Excluded as noise for this code base: C11 Annex K *_s suggestions (absent in newlib), struct padding, and
@@ -78,11 +80,16 @@ TIDY_CHECKS := -*,clang-analyzer-*,-clang-analyzer-security.insecureAPI.Deprecat
 -bugprone-reserved-identifier,-bugprone-implicit-widening-of-multiplication-result
 core-tidy: core-test
 	$(CLANG_TIDY) -p build/fc_core --quiet --checks='$(TIDY_CHECKS)' --warnings-as-errors='*' \
-		--header-filter='firmware/fc_core/(include|src)/.*' \
-		firmware/fc_core/src/*.c firmware/fc_core/host/src/*.c
+		--header-filter='firmware/fc_core/(include|src|target)/.*' \
+		firmware/fc_core/src/*.c firmware/fc_core/host/src/*.c firmware/fc_core/target/*.c
 
 flight:
 	$(call idf_build,firmware/flight,$(FLIGHT_TARGET))
+
+# Same image with fc_step running in the stabilizer task (CONFIG_ESPFC_FC_STEP); compile check, not flight-ready.
+flight-fcstep:
+	$(IDF) firmware/flight -B build-$(FLIGHT_TARGET)-fcstep -D SDKCONFIG=build-$(FLIGHT_TARGET)-fcstep/sdkconfig \
+		-D IDF_TARGET=$(FLIGHT_TARGET) -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;../fc_core/target/sdkconfig.fc_step" build
 
 radio:
 	$(call idf_build,firmware/radio,$(RADIO_TARGET))

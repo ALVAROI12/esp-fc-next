@@ -4,6 +4,10 @@
 #include "estimator.h"
 #include "estimator_complementary.h"
 #include "estimator_kalman.h"
+#include "sdkconfig.h"
+#ifdef CONFIG_ESPFC_FC_STEP
+#include "fc_runtime.h" /* ESP-FC Next: fc_step owns the estimator */
+#endif
 #include "debug_cf.h"
 #define ESTIMATOR_NAME anyEstimator
 #define DEFAULT_ESTIMATOR complementaryEstimator
@@ -182,6 +186,9 @@ bool estimatorEnqueueYawError(const yawErrorMeasurement_t* error) {
 }
 
 bool estimatorEnqueuePosition(const positionMeasurement_t *pos) {
+#ifdef CONFIG_ESPFC_FC_STEP
+  return fcRuntimeEnqueuePosition(pos); /* ESP-FC Next */
+#endif
   if (estimatorFunctions[currentEstimator].estimatorEnqueuePosition) {
     return estimatorFunctions[currentEstimator].estimatorEnqueuePosition(pos);
   }
@@ -190,6 +197,9 @@ bool estimatorEnqueuePosition(const positionMeasurement_t *pos) {
 }
 
 bool estimatorEnqueuePose(const poseMeasurement_t *pose) {
+#ifdef CONFIG_ESPFC_FC_STEP
+  return fcRuntimeEnqueuePose(pose); /* ESP-FC Next */
+#endif
   if (estimatorFunctions[currentEstimator].estimatorEnqueuePose) {
     return estimatorFunctions[currentEstimator].estimatorEnqueuePose(pose);
   }
@@ -206,6 +216,9 @@ bool estimatorEnqueueDistance(const distanceMeasurement_t *dist) {
 }
 
 bool estimatorEnqueueTOF(const tofMeasurement_t *tof) {
+#ifdef CONFIG_ESPFC_FC_STEP
+  return fcRuntimeEnqueueTof(tof); /* ESP-FC Next */
+#endif
   if (estimatorFunctions[currentEstimator].estimatorEnqueueTOF) {
     return estimatorFunctions[currentEstimator].estimatorEnqueueTOF(tof);
   }
@@ -222,6 +235,9 @@ bool estimatorEnqueueAbsoluteHeight(const heightMeasurement_t *height) {
 }
 
 bool estimatorEnqueueFlow(const flowMeasurement_t *flow) {
+#ifdef CONFIG_ESPFC_FC_STEP
+  return fcRuntimeEnqueueFlow(flow); /* ESP-FC Next */
+#endif
   if (estimatorFunctions[currentEstimator].estimatorEnqueueFlow) {
     return estimatorFunctions[currentEstimator].estimatorEnqueueFlow(flow);
   }

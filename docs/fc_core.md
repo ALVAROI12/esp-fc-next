@@ -4,10 +4,26 @@
 development machine (unit tests, SITL). It lives in `firmware/fc_core/` and compiles the algorithm
 sources **in place** from the ESP-Drone subtree, so `git subtree pull` from upstream keeps working.
 
-**Integration boundary:** the algorithm files are shared with the ESP-IDF build, but the new
-`fc_step` runtime and its 4 kHz configuration currently run on the host/SITL only. The production
-P4 image still builds ESP-Drone's asynchronous stabilizer/estimator tasks. A passing P4 build does
-not validate the new runtime, driver sampling, scheduling deadlines, or hardware safety.
+**Integration boundary:** the algorithm files are shared with the ESP-IDF build. The default
+production P4 image still builds ESP-Drone's asynchronous stabilizer/estimator tasks. With
+`CONFIG_ESPFC_FC_STEP=y` (`make flight-fcstep`, build dir `firmware/flight/build-<target>-fcstep`)
+the stabilizer task instead calls `fc_step` once per 1 kHz IMU sample through the target-only glue
+`firmware/fc_core/target/fc_runtime.c`. The P4 image is still the portable diagnostic profile
+(`CONFIG_TARGET_PORTABLE_SAFE`: no stabilizer, board outputs off until a P4 board profile exists), so
+the linker drops fc_step there; the real link check is the ESP32-S3 drone target,
+`make flight-fcstep FLIGHT_TARGET=esp32s3`.
+
+- `estimatorEnqueuePosition/Pose/TOF/Flow` hand measurements to one static FreeRTOS queue that the
+  stabilizer drains each tick into `fc_push_*` (pose keeps position only; TDOA/height/yaw-error unused).
+- Only commander setpoints with a new timestamp reach `fc_set_setpoint`, so fc_step's own watchdog
+  and failsafe run instead of the commander timeouts.
+- `systemIsArmed()` drives `fc_arm()` (which can refuse); the stabilizer emergency stop latches
+  `fc_emergency_stop()` until reboot. fc_step drives the motors; `state` is copied back for logs.
+
+Known gap: `sensorsAcquire` returns ESP-Drone's bias-corrected, low-passed samples, so fc_step filters
+them twice. Feed raw driver samples before any timing or HIL work. The 4 kHz configuration remains
+host/SITL only. A passing P4 build does not validate driver sampling, scheduling deadlines, or
+hardware safety.
 
 ```sh
 make core-test   # host build with ASan/UBSan + tests
@@ -251,6 +267,7 @@ proposed upstream.
 | `modules/interface/stabilizer_types.h` | Fixed loop rates prevented explicit host variants | Overridable main/attitude macros; target defaults unchanged |
 | `modules/src/position_controller_pid.c` | Trajectory derivatives discarded, causing tracking lag | Optional velocity/acceleration feedforward with stock defaults of zero |
 | `modules/src/controller_pid.c` / interface | Reinitialization kept stale integral and held commands | Explicit dynamics-only reset used by `fc_step` |
+| `modules/src/stabilizer.c`, `modules/src/estimator.c`, `CMakeLists.txt`, `main/Kconfig.projbuild` | No way to run `fc_step` on target | `CONFIG_ESPFC_FC_STEP` (default off): stabilizer calls `fcRuntimeStep`; position/pose/ToF/flow enqueues go to `fc_runtime` |
 
 ## Findings logged for gate G3
 

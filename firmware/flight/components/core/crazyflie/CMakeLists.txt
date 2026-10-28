@@ -24,6 +24,16 @@ if(CONFIG_ESPNOW_CONTROL)
   list(APPEND crazyflie_transport_sources "./hal/src/espnow_ctrl.c")
 endif()
 
+# ESP-FC Next: optional portable fc_step runtime, compiled in place from firmware/fc_core.
+set(crazyflie_fc_sources)
+set(crazyflie_fc_includes)
+if(CONFIG_ESPFC_FC_STEP)
+  set(fc_core_dir "${CMAKE_CURRENT_LIST_DIR}/../../../../fc_core")
+  list(APPEND crazyflie_fc_sources "${fc_core_dir}/src/fc_step.c" "${fc_core_dir}/src/fc_kalman.c"
+       "${fc_core_dir}/src/fc_rpm_notch.c" "${fc_core_dir}/target/fc_runtime.c")
+  list(APPEND crazyflie_fc_includes "${fc_core_dir}/include" "${fc_core_dir}/src" "${fc_core_dir}/target")
+endif()
+
 idf_component_register(SRCS "./hal/src/buzzer.c" 
                 "./hal/src/freeRTOSdebug.c" 
                 "./hal/src/ledseq.c" 
@@ -33,6 +43,7 @@ idf_component_register(SRCS "./hal/src/buzzer.c"
                 "./hal/src/transport.c"
                 "./hal/src/usec_time.c" 
                 ${crazyflie_transport_sources}
+                ${crazyflie_fc_sources}
                 "./modules/src/app_handler.c" 
                 "./modules/src/app_channel.c" 
                 "./modules/src/attitude_pid_controller.c"
@@ -94,7 +105,7 @@ idf_component_register(SRCS "./hal/src/buzzer.c"
                 "./utils/src/statsCnt.c"
                 "./utils/src/version.c"
                 "./utils/src/rateSupervisor.c"
-                INCLUDE_DIRS "./hal/interface" "./modules/interface" "./utils/interface"
+                INCLUDE_DIRS "./hal/interface" "./modules/interface" "./utils/interface" ${crazyflie_fc_includes}
                 REQUIRES i2c_bus deck mpu6050 ms5611 hmc5883l pmw3901 vl53l1 vl53l0 platform config led eeprom dsp_lib motors adc esp_timer esp_driver_gpio ${crazyflie_transport_requires})
 
 idf_component_get_property( FREERTOS_ORIG_INCLUDE_PATH freertos ORIG_INCLUDE_PATH)
