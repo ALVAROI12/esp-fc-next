@@ -166,6 +166,30 @@ static void test_step_timing_counters(void)
     TEST_ASSERT_EQUAL(0, (int)overruns);
 }
 
+/* Safe mode is configured from the ground (param fcRun.safeMode) and only takes effect while disarmed. */
+static void test_safe_mode_param_applies_while_disarmed(void)
+{
+    ready();
+    TEST_ASSERT_EQUAL(FC_VAR_OK, fc_param_set("fcRun", "safeMode", 1));
+    tick(false);
+    armedFake = true;
+    tick(false);
+    TEST_ASSERT_FALSE(fc_is_armed()); /* safe mode needs fresh camera position and ToF */
+    positionMeasurement_t pos = {.stdDev = 0.01f};
+    tofMeasurement_t tof = {.distance = 0, .stdDev = 0.01f};
+    TEST_ASSERT_TRUE(fcRuntimeEnqueuePosition(&pos));
+    TEST_ASSERT_TRUE(fcRuntimeEnqueueTof(&tof));
+    tick(false);
+    TEST_ASSERT_TRUE(fc_is_armed());
+    TEST_ASSERT_EQUAL(FC_VAR_OK, fc_param_set("fcRun", "safeMode", 0));
+    tick(false);
+    TEST_ASSERT_TRUE(fc_set_failsafe_enabled(true) == false); /* still armed: config is locked */
+    armedFake = false;
+    tick(false);
+    TEST_ASSERT_FALSE(fc_is_armed());
+    TEST_ASSERT_EQUAL(FC_VAR_OK, fc_param_set("fcRun", "safeMode", 0));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -174,5 +198,6 @@ int main(void)
     RUN_TEST(test_arm_follows_system_and_emergency_stop_latches);
     RUN_TEST(test_battery_voltage_reaches_fc_step);
     RUN_TEST(test_step_timing_counters);
+    RUN_TEST(test_safe_mode_param_applies_while_disarmed);
     return UNITY_END();
 }

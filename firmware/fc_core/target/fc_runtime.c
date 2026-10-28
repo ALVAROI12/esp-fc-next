@@ -11,6 +11,7 @@
 #include "commander.h"
 #include "fc_step.h"
 #include "log.h"
+#include "param.h"
 #include "pm_esplane.h"
 #include "system.h"
 #include "usec_time.h"
@@ -28,6 +29,7 @@ static QueueHandle_t queue;
 static uint32_t lastSetpointTimestamp;
 static uint32_t batteryTick;
 static uint32_t stepUs, stepMaxUs, overruns; /* timing budget (G3): fc_step cost per tick */
+static uint8_t safeMode; /* param fcRun.safeMode: latched hold-and-land supervisor, applied while disarmed */
 
 void fcRuntimeInit(void)
 {
@@ -69,6 +71,7 @@ void fcRuntimeStep(const sensorData_t *sensors, setpoint_t *setpoint, state_t *s
         fc_push_battery(pmGetBatteryVoltage());
     }
 
+    if (!fc_is_armed()) fc_set_failsafe_enabled(safeMode != 0);
     if (emergencyStop) fc_emergency_stop(); /* latched until reboot, unlike the stabilizer flag */
     bool armed = systemIsArmed();
     if (armed != fc_is_armed()) fc_arm(armed); /* fc_arm refuses (and keeps refusing) unsafe arms */
@@ -90,3 +93,7 @@ LOG_ADD(LOG_UINT32, stepUs, &stepUs)
 LOG_ADD(LOG_UINT32, stepMaxUs, &stepMaxUs)
 LOG_ADD(LOG_UINT32, overruns, &overruns)
 LOG_GROUP_STOP(fcTime)
+
+PARAM_GROUP_START(fcRun)
+PARAM_ADD(PARAM_UINT8, safeMode, &safeMode)
+PARAM_GROUP_STOP(fcRun)

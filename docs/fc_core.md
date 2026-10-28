@@ -22,6 +22,8 @@ the linker drops fc_step there; the real link check is the ESP32-S3 drone target
 
 - The ESP-Drone sensor driver keeps bias, scale and gravity alignment but skips its 80/30 Hz LPF in this
   mode; fc_step applies the same filters, so samples are filtered once.
+- Safe mode (latched hold-and-land, blind descent, low battery) is off by default; set param
+  `fcRun.safeMode=1` from the ground while disarmed. It then needs fresh mocap position and ToF to arm.
 - Battery: `pmGetBatteryVoltage()` is pushed at 10 Hz as cell voltage (1S assumed).
 - Timing budget (G3): log group `fcTime` reports `stepUs` (last fc_step call), `stepMaxUs` and
   `overruns` (calls longer than one tick). Read it with cfclient on the first board run.
