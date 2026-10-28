@@ -8,22 +8,22 @@ Command loss: after 500 ms capture a fixed estimated pose, clear trajectory feed
 
 | Rate/profile | Input loss | Motion | Recovery | State sequence | Landed after | Disarm height | Max descent / approach speed | Max XY drift | Check |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| whoop2_interim | command | hover | n/a | NORMAL@0.01s → HOLD@0.51s → LAND@2.01s → LANDED@6.99s | 6.989 s | 0.000 m | 0.257 / 0.148 m/s | 0.003 m | PASS |
-| whoop2_interim | command | moving | n/a | NORMAL@0.01s → HOLD@0.51s → LAND@2.01s → LANDED@7.05s | 7.049 s | 0.000 m | 0.262 / 0.138 m/s | 0.302 m | PASS |
-| whoop2_interim | tracking | moving | n/a | NORMAL@0.01s → LAND@0.31s → LANDED@5.37s | 5.369 s | 0.000 m | 0.261 / 0.131 m/s | 1.712 m | PASS |
-| whoop2_interim | both | moving | n/a | NORMAL@0.01s → LAND@0.31s → LANDED@5.37s | 5.369 s | 0.000 m | 0.261 / 0.134 m/s | 1.313 m | PASS |
+| whoop2_interim | command | hover | n/a | NORMAL@0.01s → HOLD@0.51s → LAND@2.01s → LANDED@7.32s | 7.319 s | 0.000 m | 0.257 / 0.153 m/s | 0.003 m | PASS |
+| whoop2_interim | command | moving | n/a | NORMAL@0.01s → HOLD@0.51s → LAND@2.01s → LANDED@7.05s | 7.049 s | 0.000 m | 0.262 / 0.141 m/s | 0.302 m | PASS |
+| whoop2_interim | tracking | moving | n/a | NORMAL@0.01s → LAND@0.31s → LANDED@5.37s | 5.369 s | 0.000 m | 0.261 / 0.138 m/s | 1.710 m | PASS |
+| whoop2_interim | both | moving | n/a | NORMAL@0.01s → LAND@0.31s → LANDED@5.37s | 5.369 s | 0.000 m | 0.261 / 0.141 m/s | 1.311 m | PASS |
 | whoop2_interim | command | hover | 0.800 s | NORMAL@0.01s → HOLD@0.51s → NORMAL@0.83s | n/a | n/a | n/a / n/a | 0.003 m | PASS |
-| whoop2_interim | command | moving | 2.500 s | NORMAL@0.01s → HOLD@0.51s → LAND@2.01s → LANDED@7.05s | 7.049 s | 0.000 m | 0.262 / 0.138 m/s | 0.302 m | PASS |
-| whoop2_interim | tracking | moving | 0.800 s | NORMAL@0.01s → LAND@0.31s → LANDED@5.41s | 5.409 s | 0.000 m | 0.258 / 0.135 m/s | 1.969 m | PASS |
-| whoop2_interim | camera + ToF (FAULT case) | hover | n/a | NORMAL@0.01s → LAND@0.31s → FAULT@6.31s | n/a | 0.000 m | 0.447 / 0.447 m/s | 0.035 m | PASS (fault containment only) |
-| whoop2_4k | command | hover | n/a | NORMAL@0.00s → HOLD@0.50s → LAND@2.00s → LANDED@7.00s | 7.004 s | 0.000 m | 0.259 / 0.141 m/s | 0.002 m | PASS |
-| whoop2_4k | command | moving | n/a | NORMAL@0.00s → HOLD@0.50s → LAND@2.00s → LANDED@7.04s | 7.044 s | 0.000 m | 0.263 / 0.140 m/s | 0.292 m | PASS |
-| whoop2_4k | tracking | moving | n/a | NORMAL@0.00s → LAND@0.30s → LANDED@5.24s | 5.244 s | 0.000 m | 0.259 / 0.139 m/s | 1.693 m | PASS |
-| whoop2_4k | both | moving | n/a | NORMAL@0.00s → LAND@0.30s → LANDED@5.30s | 5.304 s | 0.000 m | 0.259 / 0.134 m/s | 1.331 m | PASS |
+| whoop2_interim | command | moving | 2.500 s | NORMAL@0.01s → HOLD@0.51s → LAND@2.01s → LANDED@7.05s | 7.049 s | 0.000 m | 0.262 / 0.141 m/s | 0.302 m | PASS |
+| whoop2_interim | tracking | moving | 0.800 s | NORMAL@0.01s → LAND@0.31s → LANDED@5.41s | 5.409 s | 0.000 m | 0.258 / 0.143 m/s | 1.967 m | PASS |
+| whoop2_interim | camera + ToF (FAULT case) | hover | n/a | NORMAL@0.01s → LAND@0.31s → FAULT@6.31s | n/a | 0.000 m | 0.581 / 0.581 m/s | 0.028 m | PASS (fault containment only) |
+| whoop2_4k | command | hover | n/a | NORMAL@0.00s → HOLD@0.50s → LAND@2.00s → LANDED@7.32s | 7.324 s | 0.000 m | 0.259 / 0.145 m/s | 0.002 m | PASS |
+| whoop2_4k | command | moving | n/a | NORMAL@0.00s → HOLD@0.50s → LAND@2.00s → LANDED@7.04s | 7.044 s | 0.000 m | 0.263 / 0.143 m/s | 0.292 m | PASS |
+| whoop2_4k | tracking | moving | n/a | NORMAL@0.00s → LAND@0.30s → LANDED@5.24s | 5.244 s | 0.000 m | 0.259 / 0.146 m/s | 1.691 m | PASS |
+| whoop2_4k | both | moving | n/a | NORMAL@0.00s → LAND@0.30s → LANDED@5.30s | 5.304 s | 0.000 m | 0.259 / 0.141 m/s | 1.330 m | PASS |
 | whoop2_4k | command | hover | 0.800 s | NORMAL@0.00s → HOLD@0.50s → NORMAL@0.82s | n/a | n/a | n/a / n/a | 0.002 m | PASS |
-| whoop2_4k | command | moving | 2.500 s | NORMAL@0.00s → HOLD@0.50s → LAND@2.00s → LANDED@7.04s | 7.044 s | 0.000 m | 0.263 / 0.140 m/s | 0.292 m | PASS |
-| whoop2_4k | tracking | moving | 0.800 s | NORMAL@0.00s → LAND@0.30s → LANDED@5.46s | 5.464 s | 0.000 m | 0.257 / 0.137 m/s | 1.962 m | PASS |
-| whoop2_4k | camera + ToF (FAULT case) | hover | n/a | NORMAL@0.00s → LAND@0.30s → FAULT@6.30s | n/a | 0.000 m | 0.458 / 0.458 m/s | 0.016 m | PASS (fault containment only) |
+| whoop2_4k | command | moving | 2.500 s | NORMAL@0.00s → HOLD@0.50s → LAND@2.00s → LANDED@7.04s | 7.044 s | 0.000 m | 0.263 / 0.143 m/s | 0.292 m | PASS |
+| whoop2_4k | tracking | moving | 0.800 s | NORMAL@0.00s → LAND@0.30s → LANDED@5.46s | 5.464 s | 0.000 m | 0.257 / 0.144 m/s | 1.960 m | PASS |
+| whoop2_4k | camera + ToF (FAULT case) | hover | n/a | NORMAL@0.00s → LAND@0.30s → FAULT@6.30s | n/a | 0.000 m | 0.594 / 0.594 m/s | 0.011 m | PASS (fault containment only) |
 
 ## Gates and interpretation
 

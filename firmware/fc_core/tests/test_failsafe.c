@@ -335,6 +335,40 @@ static void test_blind_descent_hands_back_to_tof_and_lands(void)
     TEST_ASSERT_FALSE(motors_on());
 }
 
+/* Camera lost at 3 m: the blind budget must cover the descent into ToF range at the slowest band sink
+ * (SITL: 0.24 m/s with drag), so a fixed 6 s budget cut the motors at ~1.9 m. Still bounded. */
+static void hover_at_3m_and_lose_camera(void)
+{
+    hover();
+    for (unsigned i = 1; i <= 200; i++) drive(10, true, false, true, 1 + i * 0.01f);
+    drive(2000, true, false, true, 3);
+    drive(320, false, false, true, 0);
+}
+
+static void test_blind_budget_scales_with_entry_height(void)
+{
+    hover_at_3m_and_lose_camera();
+    TEST_ASSERT_EQUAL(FC_FAILSAFE_LAND, fc_failsafe_state());
+    drive(FC_FAILSAFE_BLIND_MS + 1000, false, false, true, 0);
+    TEST_ASSERT_EQUAL(FC_FAILSAFE_LAND, fc_failsafe_state());
+    TEST_ASSERT_TRUE(motors_on());
+    drive(3.0f / FC_FAILSAFE_BLIND_MIN_SINK_MPS * 1000 - FC_FAILSAFE_BLIND_MS, false, false, true, 0);
+    TEST_ASSERT_EQUAL(FC_FAILSAFE_FAULT, fc_failsafe_state());
+    TEST_ASSERT_BITS_HIGH(FC_FAILSAFE_REASON_HEIGHT, (unsigned)safety_log("reason"));
+}
+
+/* The LAND timeout pauses while blind (blind has its own budget): a long blind phase from 3-4 m plus the
+ * ToF-guided descent exceeded 20 s, and the timeout cut the motors at 0.96 m in SITL. */
+static void test_land_timeout_pauses_during_blind_descent(void)
+{
+    hover_at_3m_and_lose_camera();
+    drive(14000, false, false, true, 0);
+    TEST_ASSERT_EQUAL(FC_FAILSAFE_LAND, fc_failsafe_state());
+    drive(FC_FAILSAFE_LAND_TIMEOUT_MS - 14000 + 1000, false, true, true, 1); /* ToF back, still at 1 m */
+    TEST_ASSERT_EQUAL(FC_FAILSAFE_LAND, fc_failsafe_state());
+    TEST_ASSERT_TRUE(motors_on());
+}
+
 static unsigned mean_motor_ratio(void)
 {
     unsigned sum = 0;
@@ -397,6 +431,38 @@ static void test_low_battery_lands_and_blocks_arming(void)
     fly_with_battery(500, 3.9f); /* recovered voltage and fresh commands cannot cancel LAND */
     TEST_ASSERT_EQUAL(FC_FAILSAFE_LAND, fc_failsafe_state());
     TEST_ASSERT_TRUE(motors_on());
+}
+
+/* After a normal landing without disarming, ground-idle thrust must not be learned as hover thrust:
+ * a camera loss on the next flight would otherwise clamp blind descent far below hover. */
+static void test_hover_thrust_is_not_learned_on_the_ground(void)
+{
+    hover();
+    double learned = safety_log("hoverThrust");
+    TEST_ASSERT_TRUE(learned > 20000);
+    for (uint32_t i = 0; i < FC_MS_TO_TICKS(3000); i++) {
+        if (i % FC_MS_TO_TICKS(10) == 0) {
+            TEST_ASSERT_TRUE(fc_push_position(0.3f, -0.2f, 0, 0.01f));
+            TEST_ASSERT_TRUE(fc_push_tof(0, 0.01f));
+            fc_set_position_setpoint(0.3f, -0.2f, 0, 0);
+        }
+        step(STILL, LEVEL);
+    }
+    TEST_ASSERT_TRUE(fc_is_armed());
+    TEST_ASSERT_FLOAT_WITHIN(learned * 0.02, learned, safety_log("hoverThrust"));
+}
+
+/* A loaded pack hovering at the threshold reads noisy ADC samples on both sides; that must still land. */
+static void test_noisy_low_battery_still_lands(void)
+{
+    TEST_ASSERT_TRUE(fc_push_battery(3.9f));
+    hover();
+    for (unsigned i = 0; i < (FC_FAILSAFE_LOW_BATTERY_MS + 200) / 10; i++) {
+        TEST_ASSERT_TRUE(fc_push_battery(i % 2 ? FC_FAILSAFE_LOW_BATTERY_V + 0.01f : FC_FAILSAFE_LOW_BATTERY_V - 0.01f));
+        drive(10, true, true, true, 1);
+    }
+    TEST_ASSERT_EQUAL(FC_FAILSAFE_LAND, fc_failsafe_state());
+    TEST_ASSERT_BITS_HIGH(FC_FAILSAFE_REASON_LOW_BATTERY, (unsigned)safety_log("reason"));
 }
 
 static void test_camera_height_fallback_and_slow_descent(void)
@@ -764,11 +830,15 @@ int main(void)
     RUN_TEST(test_xy_loss_during_landing_is_permanent);
     RUN_TEST(test_all_height_loss_is_fault_not_success_and_cannot_rearm);
     RUN_TEST(test_blind_descent_hands_back_to_tof_and_lands);
+    RUN_TEST(test_blind_budget_scales_with_entry_height);
+    RUN_TEST(test_land_timeout_pauses_during_blind_descent);
     RUN_TEST(test_blind_descent_thrust_stays_below_hover_despite_accel_bias);
     RUN_TEST(test_camera_height_fallback_and_slow_descent);
     RUN_TEST(test_touchdown_requires_actual_low_height_low_speed_and_dwell);
     RUN_TEST(test_touchdown_dwell_thrust_stays_below_hover);
     RUN_TEST(test_low_battery_lands_and_blocks_arming);
+    RUN_TEST(test_noisy_low_battery_still_lands);
+    RUN_TEST(test_hover_thrust_is_not_learned_on_the_ground);
     RUN_TEST(test_landing_timeout_is_fault);
     RUN_TEST(test_touchdown_dwell_restarts_after_height_rises);
     RUN_TEST(test_tof_expiry_during_dwell_uses_camera_height_and_restarts_dwell);

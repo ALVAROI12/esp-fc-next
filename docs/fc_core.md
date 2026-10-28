@@ -207,13 +207,16 @@ not activate a new production P4 task loop or change any CRTP packet formats.
 | NORMAL (0) | Use mission commands; after 500 ms command silence capture current estimated pose |
 | HOLD (1) | Fixed pose, zero stale trajectory feedforward; after 1.5 s enter LAND; fresh commands may resume before LAND |
 | LAND (2) | Latched descent, nominally 0.25 m/s, slowing to 0.10 m/s below 15 cm; renewed mission commands cannot cancel it |
-| LAND, blind | Camera and ToF both stale above 15 cm (e.g. camera lost above the 1.3 m ToF range): descend for at most 6 s on the IMU-propagated estimate with thrust held at 0.97-0.99 x the hover thrust learned while height was aided, so an unseen accel bias cannot make it climb; the band stays 1 s after a height source returns (reason bit 32) |
+| LAND, blind | Camera and ToF both stale above 15 cm (e.g. camera lost above the 1.3 m ToF range): descend on the IMU-propagated estimate for at most max(6 s, entry height / 0.2 m/s) (the 0.2 m/s slowest band sink is a hardware calibration knob; 6 s only without a learned hover thrust; the 20 s LAND timeout pauses while blind, so 4 m with -0.02 g bias lands at about 28 s) with thrust held at 0.97-0.99 x the hover thrust learned while height was aided, so an unseen accel bias cannot make it climb; the band stays 1 s after a height source returns (reason bit 32) |
 | LANDED (3) | Height <= 4 cm and estimated vertical speed <= 0.15 m/s for 500 ms (thrust capped at 0.99 x hover during the dwell, so a biased estimate cannot hold it a few cm up): disarm and block automatic rearm |
 | FAULT (4) | No trustworthy height near the ground or after the blind budget, invalid state, or landing timeout: motor stop; **not** successful controlled landing |
 
 Camera input older than 300 ms triggers LAND even if commands still arrive. So does a reported cell
 voltage (`fc_push_battery`, pack voltage / cells) below 3.3 V for 1 s while flying (reason bit 64), from a
-held pose; a low pack also refuses arming. Short sags reset the 1 s timer. XY hold is allowed only
+held pose; a low pack also refuses arming. Once the timer runs, only a reading of 3.4 V or more (0.1 V
+hysteresis) resets it, so a noisy pack near 3.3 V still lands. The hover thrust used by the blind and
+touchdown bands is learned only while airborne above lift-off height, with aided height and |vz| < 0.2 m/s,
+tilt-compensated. XY hold is allowed only
 with fresh tracking; after tracking loss it uses local velocity braking when qualified flow/range
 is available, otherwise level roll/pitch. It never resumes absolute XY hold in that landing.
 Independent ToF (200 ms freshness, tilt checked)
@@ -227,13 +230,13 @@ the viewer scenario is `?scenario=failsafe`. `SitlDrone(..., safe_landing=True)`
 local ToF; `link_up`, `tracking_up` and `height_up` independently gate command, camera and range delivery.
 
 Baseline without local flow, seed-9 SITL at 1/4 kHz: controlled cases reach LANDED about 5.24-7.05 s after loss,
-max descent about 0.263 m/s, sampled final approach 0.131-0.148 m/s (the touchdown-dwell thrust ceiling
+max descent about 0.263 m/s, sampled final approach 0.138-0.153 m/s (the touchdown-dwell thrust ceiling
 adds about 0.04 m/s), and motor disarm at ground.
 Restored commands during LAND do not restart flight. Moving camera-only loss still produces
 about **1.7 m XY excursion**, rising to about **2.0 m** with the restored/jumped camera reference
 (combined loss about 1.3 m), so this is not collision-safe swarm flight.
 The all-height-loss cases (camera and ToF lost at 1 m) now blind-descend and touch down at about
-0.45 m/s; the 6 s budget then stops the motors on the ground (before: motor stop at 1 m, 4.2 m/s fall).
+0.58 m/s (0.99 x an unbiased learned hover); the 6 s budget then stops the motors on the ground (before: motor stop at 1 m, 4.2 m/s fall).
 It still ends in FAULT: a tested fault path,
 not a safe-landing pass. See the report for the exact cases, gates and sampled metrics.
 

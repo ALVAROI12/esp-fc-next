@@ -218,10 +218,11 @@ def build():
         ["Safety: hold + landing", "Opt-in SITL; hardware pending",
          "Command loss: fixed-pose hold then descent; camera loss: level descent with independent local ToF. "
          "LAND stays latched through touchdown, even if commands return; terminal states block automatic rearm. "
-         "Nominal 1/4 kHz SITL: max descent 0.263 m/s, sampled touchdown approach 0.131-0.148 m/s; motors off at ground. "
-         "Camera lost above the 1.3 m ToF range: bounded 6 s blind descent with thrust held at 0.97-0.99 x learned "
-         "hover, so a +/-0.02 g unseen accel bias still lands (it climbed to 4 m and fell before). "
-         "Permanent loss of every height source still ends in FAULT (from 1 m: 0.45 m/s contact, then motor stop on the "
+         "Nominal 1/4 kHz SITL: max descent 0.263 m/s, sampled touchdown approach 0.138-0.153 m/s; motors off at ground. "
+         "Camera lost above the 1.3 m ToF range: bounded blind descent (max(6 s, entry height / 0.2 m/s)) with thrust held "
+         "at 0.97-0.99 x learned hover, so a +/-0.02 g unseen accel bias still lands from 2-4 m (it climbed to 4 m and "
+         "fell before; a fixed 6 s budget cut the motors at 1.9 m after loss at 3 m). "
+         "Permanent loss of every height source still ends in FAULT (from 1 m: 0.58 m/s contact, then motor stop on the "
          "ground at 6 s; before: 4.2 m/s fall), not safe landing."],
         ["Local flow braking", "SITL checks pass; hardware pending",
          "Healthy flow/range enables zero-velocity braking after camera loss instead of passive coasting. "

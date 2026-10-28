@@ -67,7 +67,7 @@ static struct {
     uint32_t positionTick, tofTick, holdTick, landTick, touchdownTick, estimatorResets;
     float holdX, holdY, holdZ, holdYaw, tofHeight, height;
     bool haveFlow, flowLanding, blind, blindCap;
-    uint32_t blindTick, blindLastTick;
+    uint32_t blindTick, blindLastTick, blindBudget;
     float hoverThrust; /* EMA of the commanded thrust while airborne with a height source */
     float batteryV;
     bool haveBattery, lowBatteryPending;
@@ -346,7 +346,9 @@ bool fc_push_battery(float cell_volts)
 
 static bool battery_low(void)
 {
-    if (!fc.haveBattery || fc.batteryV >= FC_FAILSAFE_LOW_BATTERY_V) {
+    /* Hysteresis: noisy samples around the threshold must not keep restarting the timer. */
+    if (!fc.haveBattery || fc.batteryV >= FC_FAILSAFE_LOW_BATTERY_V + FC_FAILSAFE_LOW_BATTERY_HYST_V ||
+        (!fc.lowBatteryPending && fc.batteryV >= FC_FAILSAFE_LOW_BATTERY_V)) {
         fc.lowBatteryPending = false;
         return false;
     }
@@ -538,13 +540,16 @@ static void apply_failsafe(const float gyro[3], const float acc[3])
             fc.blindTick = fc.tick;
             /* LAND started this tick: no measured landing height yet; the estimate was aided until now. */
             if (fc.landTick == fc.tick) fc.height = fc.state.position.z - fc.groundZ;
+            /* The sink band (learned hover thrust) guarantees descent: allow time to sink the entry height. */
+            float sinkMs = fc.hoverThrust > 0 ? fc.height / FC_FAILSAFE_BLIND_MIN_SINK_MPS * 1000.0f : 0;
+            fc.blindBudget = FC_MS_TO_TICKS(fminf(fmaxf(sinkMs, FC_FAILSAFE_BLIND_MS), FC_FAILSAFE_LAND_TIMEOUT_MS));
         }
-        if (fc.height <= FC_FAILSAFE_SLOW_HEIGHT_M ||
-            (uint32_t)(fc.tick - fc.blindTick) >= FC_MS_TO_TICKS(FC_FAILSAFE_BLIND_MS)) {
+        if (fc.height <= FC_FAILSAFE_SLOW_HEIGHT_M || (uint32_t)(fc.tick - fc.blindTick) >= fc.blindBudget) {
             safety_fault(FC_FAILSAFE_REASON_HEIGHT);
             return;
         }
         fc.safetyReason |= FC_FAILSAFE_REASON_BLIND;
+        fc.landTick++; /* LAND timeout pauses: blind has its own budget (from 4 m both together exceeded 20 s) */
         fc.blindCap = true;
         fc.blindLastTick = fc.tick;
         fc.touchdownPending = false; /* touchdown needs a measured height */
@@ -663,10 +668,14 @@ void fc_step(const float gyro_raw[3], const float acc_raw[3])
         float lo = fc.blindCap ? fc.hoverThrust * FC_FAILSAFE_SINK_THRUST_MIN : 0;
         fc.control.thrust = fminf(fmaxf(fc.control.thrust, lo), fc.hoverThrust * FC_FAILSAFE_SINK_THRUST_MAX);
     }
-    if (fc.airborne && fc.safetyState < FC_FAILSAFE_LAND && (position_fresh() || tof_fresh())) {
-        /* ponytail: 1 s EMA; a camera loss within ~1 s of lift-off learns a climb-biased hover thrust. */
-        if (fc.hoverThrust <= 0) fc.hoverThrust = fc.control.thrust;
-        fc.hoverThrust += (fc.control.thrust - fc.hoverThrust) / (float)FC_STEP_RATE_HZ; /* 1 s */
+    if (fc.airborne && fc.safetyState < FC_FAILSAFE_LAND && (position_fresh() || tof_fresh()) &&
+        fc.state.position.z > fc.groundZ + FC_LIFTOFF_HEIGHT_M && fabsf(fc.state.velocity.z) < 0.2f) {
+        /* Level-equivalent thrust: vertical force ~ thrust^2 * cos(tilt), and the PID adds no tilt term.
+         * Learned only near steady height, so climbs, sinks and ground idle do not bias it.
+         * ponytail: 1 s EMA, no acceleration gate; vertical manoeuvres under 0.2 m/s still leak in. */
+        float level = fc.control.thrust * sqrtf(fmaxf(vertical_cosine(), 0.5f));
+        if (fc.hoverThrust <= 0) fc.hoverThrust = level;
+        fc.hoverThrust += (level - fc.hoverThrust) / (float)FC_STEP_RATE_HZ; /* 1 s */
     }
 
     if (fc.armed && !fc.emergencyStop) {

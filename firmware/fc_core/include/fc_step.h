@@ -86,8 +86,12 @@ typedef enum {
 #define FC_FAILSAFE_MAX_TOF_M 4.0f
 /* Camera and ToF both stale while airborne above FC_FAILSAFE_SLOW_HEIGHT_M (e.g. camera lost above the
  * VL53L1X short-mode 1.3 m range): keep descending on the IMU-propagated estimate for at most this long,
- * so the ToF can come back into range, before the FAULT motor stop. Covers ~1.5 m of blind descent. */
+ * so the ToF can come back into range, before the FAULT motor stop. Minimum budget, and the whole budget
+ * when no hover thrust was learned (no sink band). */
 #define FC_FAILSAFE_BLIND_MS 6000
+/* With a learned hover thrust the sink band guarantees descent, so the budget grows to the time to sink the
+ * entry height at this slowest expected band sink (SITL drag-limited: 0.24 m/s). Calibrate on hardware. */
+#define FC_FAILSAFE_BLIND_MIN_SINK_MPS 0.2f
 /* Blind-descent (and, ceiling only, touchdown-dwell) thrust band as a fraction of the hover thrust learned while height was aided. The unaided
  * estimate drifts with any z accel bias (-0.02 g climbed to 4 m in SITL); the band guarantees a sink of
  * roughly 0.2-0.6 m/s^2 (force ~ ratio^2) whatever the estimate believes, until the ToF is back in range. */
@@ -101,6 +105,7 @@ typedef enum {
  * ponytail: fixed LiPo threshold; a sag-compensated (current-aware) estimate needs current sensing. */
 #define FC_FAILSAFE_LOW_BATTERY_V 3.3f
 #define FC_FAILSAFE_LOW_BATTERY_MS 1000
+#define FC_FAILSAFE_LOW_BATTERY_HYST_V 0.1f /* once low, only a reading this far above clears the timer */
 
 /* Disarmed-only. Disabled in a fresh process, preserving the legacy commander watchdog.
  * LANDED/FAULT (and an interrupted LAND) require fc_init() before rearming. */

@@ -9,8 +9,8 @@
 | nominal mission | 0.35 m (drones 2-3) | ok (0.03 m/s), ok (0.11 m/s), ok (0.01 m/s), ok (0.04 m/s) | PASS |
 | link loss in formation (drone 0) | 0.35 m (drones 2-3) | ok (0.15 m/s), ok (0.02 m/s), ok (0.00 m/s), ok (0.04 m/s) | PASS |
 | mocap dropout in formation (drone 1) | 0.35 m (drones 2-3) | ok (0.01 m/s), ok (0.14 m/s), ok (0.00 m/s), ok (0.04 m/s) | PASS |
-| link loss mid-swap, top layer (drone 3) | 0.35 m (drones 2-3) | ok (0.01 m/s), ok (0.20 m/s), ok (0.00 m/s), ok (0.14 m/s) | PASS |
-| mocap dropout mid-swap, top layer (drone 3) | 0.35 m (drones 2-3) | ok (0.01 m/s), ok (0.20 m/s), ok (0.00 m/s), ok (0.13 m/s) | PASS |
+| link loss mid-swap, top layer (drone 3) | 0.35 m (drones 2-3) | ok (0.01 m/s), ok (0.20 m/s), ok (0.00 m/s), ok (0.01 m/s) | PASS |
+| mocap dropout mid-swap, top layer (drone 3) | 0.35 m (drones 2-3) | ok (0.01 m/s), ok (0.20 m/s), ok (0.00 m/s), ok (0.14 m/s) | PASS |
 | low battery in formation (drone 2) | 0.35 m (drones 2-3) | ok (0.01 m/s), ok (0.02 m/s), ok (0.14 m/s), ok (0.04 m/s) | PASS |
 | low battery mid-swap, top layer (drone 3) | 0.35 m (drones 2-3) | ok (0.01 m/s), ok (0.20 m/s), ok (0.00 m/s), ok (0.14 m/s) | PASS |
 
