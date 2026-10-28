@@ -120,6 +120,8 @@ header on the left edge between the holes (FC: header on top; radio: socket on t
 USB-C on the bottom edge. The P4, crystal and IMU stay on top; the rest may go underneath. pF/nF caps are 0201: with
 0402 the flight board did not fit (16 caps left over at ~85 % courtyard fill). Not routed. The rules in
 `out/<board>.kicad_pro` (0.1 mm track/space, 0.3/0.15 mm vias) are generic placeholders, not a fab's limits.
+GND: solid plane on In1, pours on F.Cu and B.Cu (In2 free for routing); unconnected items fall 244 -> 169 (FC) and
+54 -> 18 (radio). The rest needs routing and GND stitching vias.
 `make hw-pcb` also renders `out/render/*.png` and plots the power-path transient to `out/power_transient.png`.
 KiCad DRC after placement, besides unrouted nets and silkscreen: the FC stack header courtyard overlaps two M2 hole
 courtyards (header body clears an M2 head by ~0.5 mm); the radio board's C5 module courtyard overlaps all four hole

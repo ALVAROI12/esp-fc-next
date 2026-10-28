@@ -202,6 +202,23 @@ def main(netlist, out, side, holes):
     for fp in fps.values():  # reference designators on the fab layer: a 25 mm board has no room for them on silk
         fp.Reference().SetLayer(pcbnew.B_Fab if fp.IsFlipped() else pcbnew.F_Fab)
 
+    # GND: solid plane on In1 (reference for every signal on top), pours on the outer layers. In2 left for routing.
+    # ponytail: no power planes; split In2 into VSYS/3V3 islands if the router can't carry the currents.
+    for layer in (pcbnew.In1_Cu, pcbnew.F_Cu, pcbnew.B_Cu):
+        zone = pcbnew.ZONE(board)
+        zone.SetLayer(layer)
+        zone.SetNet(netinfo["GND"])
+        zone.SetLocalClearance(mm(0.2))
+        zone.SetMinThickness(mm(0.15))
+        zone.SetIslandRemovalMode(pcbnew.ISLAND_REMOVAL_MODE_ALWAYS)
+        zone.SetAssignedPriority(0 if layer == pcbnew.In1_Cu else 1)
+        poly = zone.Outline()
+        poly.NewOutline()
+        for x, y in ((-half, -half), (half, -half), (half, half), (-half, half)):
+            poly.Append(mm(CENTER[0] + x), mm(CENTER[1] + y))
+        board.Add(zone)
+    pcbnew.ZONE_FILLER(board).Fill(board.Zones())
+
     pcbnew.SaveBoard(str(out), board)
     # Netclass rules live in the project file. ponytail: generic fine-pitch 4-layer values (0.1 mm track/space,
     # 0.3/0.15 mm vias); replace with the chosen fab's published limits before ordering.
