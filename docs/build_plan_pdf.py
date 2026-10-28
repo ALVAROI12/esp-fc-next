@@ -237,7 +237,9 @@ def build():
          "docs/protocols.md: 64-byte P4-C5 SPI frame with CRC-16, 20-byte 50 Hz swarm status, 32-message "
          "anti-replay window; unit tests + libFuzzer (make link-fuzz, 1 h run: 4.3 B inputs, no crash); builds on "
          "the C5 toolchain. AES-128-CCM envelope built on IDF mbedtls 3.6.7 with RFC 3610 vector tests; C5 boot "
-         "self-check not yet run on a board; no SPI/ESP-NOW transport yet."],
+         "self-check not yet run on a board. C5 bridge (fc_radio): envelope &lt;-&gt; SPI frame, ground-only commands, "
+         "NVS-reserved counters (no nonce reuse across reboot); C5 image wires ESP-NOW + SPI slave (compile-checked). "
+         "Not yet: P4 SPI master, provisioning tool, Crazyswarm2 bridge."],
         ["fc_step on target", "Builds; never flown",
          "CONFIG_ESPFC_FC_STEP runs fc_step in ESP-Drone's stabilizer task (make flight-fcstep, CI on ESP32-S3: +7 KB). "
          "Mocap/pose/ToF/flow reach it through a static queue; only new commander packets feed its watchdog; host "

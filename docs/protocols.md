@@ -1,7 +1,7 @@
 # ESP-FC Next link protocols (Task 1.7)
 
 Code: `firmware/fc_core/include/fc_link.h`, `firmware/fc_core/src/fc_link.c` (portable C, built on host,
-P4 and C5). Radio envelope: `fc_link_aead.h/.c` (section 3). Tests: `tests/test_link.c`. Fuzzing: `make link-fuzz` (libFuzzer + ASan/UBSan; 1 h: 4.32 B inputs, no crash) and `make link-fuzz FUZZ_TARGET=fuzz_link_aead` (arbitrary bytes never open; sealed input opens once, bit flips rejected; 1 h: 83.5 M inputs, no crash).
+P4 and C5). Radio envelope: `fc_link_aead.h/.c` (section 3). C5 bridge: `fc_radio.h/.c` (section 5). Tests: `tests/test_link.c`. Fuzzing: `make link-fuzz` (libFuzzer + ASan/UBSan; 1 h: 4.32 B inputs, no crash) and `make link-fuzz FUZZ_TARGET=fuzz_link_aead` (arbitrary bytes never open; sealed input opens once, bit flips rejected; 1 h: 83.5 M inputs, no crash).
 
 All multi-byte fields are little-endian. No packed structs cross the wire; every field is written byte by byte.
 
@@ -70,6 +70,28 @@ broadcast, so the swarm status and swarm commands use an application-level envel
 
 ## 4. Not covered yet
 
-- ESP-NOW / Wi-Fi transport code on the C5, SPI driver code on the P4/C5, link-loss timing on hardware.
-- Key provisioning and counter persistence.
+- P4 SPI master driver and its CRTP hand-off to the flight firmware; link-loss timing on hardware.
+- A provisioning tool (the NVS layout is defined in section 5; `nvs_partition_gen.py` can write it).
 - Crazyswarm2 bridge (CRTP over UDP/ESP-NOW to the ground station).
+- Group key: every member can seal any message. CRTP is accepted only from sender id 0 (ground), so a buggy
+  drone cannot command another, but a compromised drone can impersonate the ground. Per-sender keys fix that.
+
+## 5. C5 bridge (`fc_radio`)
+
+Code: `include/fc_radio.h`, `src/fc_radio.c` (portable, host-tested in `tests/test_radio.c`), wired in
+`firmware/radio/main/main.c`.
+
+- Air to P4: `fc_radio_from_air` opens the envelope, then encodes the plaintext (type byte + payload) as one SPI
+  frame with the C5's own per-direction `seq`. It drops: failed authentication or replay, IDLE or unknown types,
+  oversize payloads, and CRTP from any sender other than id 0 (ground).
+- P4 to air: `fc_radio_to_air` decodes one SPI frame and seals non-IDLE frames as a broadcast with the C5's id.
+  Corrupt frames are dropped and counted.
+- Counter persistence: counters are reserved in blocks of 4096 and stored in NVS before use. A reboot resumes at
+  the stored limit, so it never reuses a nonce. Sending stalls instead of overrunning the reservation. At 50 Hz a
+  block lasts 80 s, about 1100 NVS writes per day. When the 32-bit space is spent it stops sending (rekey).
+- Transport: the P4 is SPI master and polls; each transaction carries one frame each way, IDLE when there is
+  nothing to deliver. ESP-NOW receives go through a 16-deep queue (drop when full); all envelope work runs in
+  one task. SPI pins and the Wi-Fi channel are Kconfig placeholders until the board exists.
+- Provisioning: NVS namespace `fclink`: `key` (16-byte blob), `net` (u32), `id` (u8), `ctr` (u32, written by
+  the firmware). There is no default key. Without one the radio stays off; the P4 then sees no valid frames and its
+  command watchdog lands.

@@ -1,0 +1,23 @@
+menu "ESP-FC Next radio"
+
+config ESPFC_RADIO_SPI_MOSI
+    int "SPI slave MOSI GPIO (from P4)"
+    default 2
+config ESPFC_RADIO_SPI_MISO
+    int "SPI slave MISO GPIO (to P4)"
+    default 3
+config ESPFC_RADIO_SPI_SCLK
+    int "SPI slave SCLK GPIO"
+    default 4
+config ESPFC_RADIO_SPI_CS
+    int "SPI slave CS GPIO"
+    default 5
+    help
+        Placeholder pins until the P4+C5 board exists; set them from the schematic.
+
+config ESPFC_RADIO_CHANNEL
+    int "Wi-Fi channel for ESP-NOW (all swarm members and the ground bridge)"
+    range 1 13
+    default 1
+
+endmenu
