@@ -1,6 +1,6 @@
 (footprint "Texas_DLA0010A_VSON-HR-10_3x2mm_P0.5mm"
   (version 20260206)
-  (generator "espfc_footprints")
+  (generator "espfc_library")
   (layer "F.Cu")
   (descr "TI DLA0010A VSON-HR 10 pin, TPS63802 (SLVSEU9D example board layout 4223750/D)")
   (attr smd)

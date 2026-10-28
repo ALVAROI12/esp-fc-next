@@ -19925,7 +19925,7 @@
 					)
 				)
 			)
-			(pin bidirectional line
+			(pin power_in line
 				(at -24.13 44.45 270)
 				(length 2.54)
 				(name "VDD_ANA"
@@ -19943,7 +19943,7 @@
 					)
 				)
 			)
-			(pin bidirectional line
+			(pin power_in line
 				(at -26.67 44.45 270)
 				(length 2.54)
 				(name "VDD_BAT"
@@ -22158,7 +22158,7 @@
 					)
 				)
 			)
-			(pin bidirectional line
+			(pin power_in line
 				(at -24.13 44.45 270)
 				(length 2.54)
 				(name "VDD_ANA"
@@ -22176,7 +22176,7 @@
 					)
 				)
 			)
-			(pin bidirectional line
+			(pin power_in line
 				(at -26.67 44.45 270)
 				(length 2.54)
 				(name "VDD_BAT"

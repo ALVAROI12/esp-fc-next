@@ -22,7 +22,7 @@ Dual-chip ESP32-P4 (flight) + ESP32-C5 (radio) flight controller. Plan: `docs/ES
 - `make core-coverage` - coverage summary + HTML in `build/coverage/`
 - `make sim-setup` / `make sim-test` - Python sim environment (uv, Python 3.12) and tests
 - `make swarm` - four-drone SITL missions with injected faults (Task 1.8)
-- `make hw-setup` / `make hw` - Phase 3 boards as code (`hardware/boards.py`, SKiDL; needs KiCad + ngspice): netlists and G4 netlist/power checks, see `hardware/DESIGN.md`
+- `make hw-setup` / `make hw` - Phase 3 boards as code (`hardware/boards.py`, SKiDL; needs KiCad + ngspice): netlists, drawn KiCad sheets and G4 netlist/footprint/ERC/power checks, see `hardware/DESIGN.md`
 - `make g1` - gate G1 report; re-run after changing gains, loop timing, or `sim/model/params.py`
 - `make viewer` - 3D replay viewer of the G1 and SITL scenarios (generated, git-ignored)
 - SITL (`sim/sitl`) rebuilds `build/fc_sitl` automatically from `firmware/fc_core` when sources change

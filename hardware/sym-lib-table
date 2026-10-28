@@ -1,0 +1,5 @@
+(sym_lib_table
+  (version 7)
+  (lib (name "ESPFC")(type "KiCad")(uri "${KIPRJMOD}/lib/ESPFC.kicad_sym")(options "")(descr "ESP-FC Next symbols (library.py)"))
+  (lib (name "Espressif")(type "KiCad")(uri "${KIPRJMOD}/lib/espressif/Espressif.kicad_sym")(options "")(descr "Espressif official, P4 power pins retyped (UPSTREAM)"))
+)

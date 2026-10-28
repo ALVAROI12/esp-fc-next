@@ -4,14 +4,15 @@
 """
 import builtins
 import os
+import re
 from pathlib import Path
 
-from skidl import KICAD9, POWER, SKIDL, TEMPLATE, Circuit, Net, Part, Pin, lib_search_paths, set_default_tool
+from skidl import KICAD9, POWER, Circuit, Net, Part, Pin, lib_search_paths, set_default_tool
 
 HERE = Path(__file__).resolve().parent
 set_default_tool(KICAD9)
 lib_search_paths[KICAD9] += [os.environ.get("KICAD9_SYMBOL_DIR", "/Applications/KiCad/KiCad.app/Contents/SharedSupport/symbols"),
-                             str(HERE / "lib/espressif")]
+                             str(HERE / "lib/espressif"), str(HERE / "lib")]  # lib/ESPFC.kicad_sym: library.py
 T = Pin.types
 
 # P4 <-> C5 board-to-board signals, connector pin 1..12 (both boards use this order).
@@ -21,47 +22,12 @@ STACK = ["3V3", "3V3", "GND", "GND", "C5_MOSI", "C5_MISO", "C5_SCLK", "C5_CS", "
 P4 = dict(IMU_CS=7, IMU_MOSI=8, IMU_SCLK=9, IMU_MISO=10, IMU_INT=11,  # SPI2 IO MUX pins
           C5_MOSI=2, C5_MISO=3, C5_SCLK=4, C5_CS=5, FLOW_CS=6,  # SPI3 (GPIO2-5 are JTAG; we debug over USB)
           C5_EN=12, C5_BOOT=13, P4_TX=14, P4_RX=15,
-          ESC_CUR=16, ESC_TLM=17, SDA=28, SCL=29,
+          ESC_CUR=16, ESC_TLM=17, IMU_INT2=18, SDA=28, SCL=29,
           M1=45, M2=46, M3=47, M4=48, CRSF_TX=50, CRSF_RX=51)
 # C5 side (firmware/radio/main/Kconfig.projbuild); avoids the C5 strapping pins 2, 3, 7, 25-28.
 C5 = dict(C5_MOSI=8, C5_MISO=9, C5_SCLK=6, C5_CS=10, P4_TX=12, P4_RX=11)  # UART0: RX=12 gets P4_TX
 
 R0402, C0402, C0603 = "Resistor_SMD:R_0402_1005Metric", "Capacitor_SMD:C_0402_1005Metric", "Capacitor_SMD:C_0603_1608Metric"
-
-
-def custom(name, footprint, pins, ref="U"):
-    """Part missing from the KiCad library: pins are (number, name, type) from the datasheet in DESIGN.md."""
-    return Part(name=name, tool=SKIDL, dest=TEMPLATE, ref_prefix=ref, footprint=footprint,
-                pins=[Pin(num=n, name=nm, func=f) for n, nm, f in pins])
-
-
-def ICM42688P():
-    return custom("ICM-42688-P", "Package_LGA:LGA-14_3x2.5mm_P0.5mm_LayoutBorder3x4y", [
-        (1, "SDO", T.OUTPUT), (2, "RESV2", T.PASSIVE), (3, "RESV3", T.PASSIVE), (4, "INT1", T.OUTPUT),
-        (5, "VDDIO", T.PWRIN), (6, "GND", T.PWRIN), (7, "RESV7", T.PASSIVE), (8, "VDD", T.PWRIN),
-        (9, "FSYNC", T.INPUT), (10, "RESV10", T.PASSIVE), (11, "RESV11", T.PASSIVE), (12, "CS", T.INPUT),
-        (13, "SCLK", T.INPUT), (14, "SDI", T.INPUT)])()
-
-
-# ponytail: KiCad has no footprint for these two; draw ESPFC.pretty from the datasheets at layout.
-def BMP581():
-    return custom("BMP581", "ESPFC:Bosch_LGA-10_2x2mm_P0.5mm", [
-        (1, "VDDIO", T.PWRIN), (2, "SCK", T.INPUT), (3, "VSS3", T.PWRIN), (4, "SDI", T.BIDIR), (5, "SDO", T.BIDIR),
-        (6, "CSB", T.INPUT), (7, "INT", T.OUTPUT), (8, "VSS8", T.PWRIN), (9, "VSS9", T.PWRIN), (10, "VDD", T.PWRIN)])()
-
-
-def DMP1022UFDF():
-    """P-FET, Diodes DS36624 rev 6-2: 19 mOhm max at VGS -2.5 V, 26 at -1.8 V; VGS(th) -0.35 to -0.8 V.
-    Pads as KiCad's footprint: 1, 2, 5, 6 and paddle 7 drain, 3 gate, 4 and pad 8 source."""
-    return custom("DMP1022UFDF-7", "Package_DFN_QFN:Diodes_UDFN2020-6_Type-F", [
-        (1, "D", T.PASSIVE), (2, "D", T.PASSIVE), (3, "G", T.INPUT), (4, "S", T.PASSIVE), (5, "D", T.PASSIVE),
-        (6, "D", T.PASSIVE), (7, "D", T.PASSIVE), (8, "S", T.PASSIVE)], ref="Q")()
-
-
-def TPS63802():
-    return custom("TPS63802", "ESPFC:Texas_DLA0010A_VSON-HR-10_3x2mm_P0.5mm", [
-        (1, "EN", T.INPUT), (2, "MODE", T.INPUT), (3, "AGND", T.PWRIN), (4, "FB", T.INPUT), (5, "PG", T.OPENCOLL),
-        (6, "VOUT", T.PWROUT), (7, "L2", T.PASSIVE), (8, "GND", T.PWRIN), (9, "L1", T.PASSIVE), (10, "VIN", T.PWRIN)])()
 
 
 def r(a, b, value, fp=R0402):
@@ -99,7 +65,7 @@ def power(*names):
 
 
 def stack_connector(nets):
-    j = Part("Connector_Generic", "Conn_01x12", ref="J_STACK",
+    j = Part("Connector_Generic", "Conn_01x12", value="STACK",
              footprint="Connector_PinHeader_1.27mm:PinHeader_1x12_P1.27mm_Vertical")
     for i, name in enumerate(STACK, 1):
         nets[name] += j[i]
@@ -110,15 +76,13 @@ def fc_board():
     vbat, vsys, vbus, v33, vhp, gnd = power("VBAT", "VSYS", "VBUS", "3V3", "VDD_HP", "GND")
     sig = {k: Net(k) for k in P4}
     p4 = Part("Espressif", "ESP32-P4X", ref="U1", value="ESP32-P4NRW16X")
-    for pin in p4["VDD_ANA", "VDD_BAT"]:
-        pin.func = T.PWRIN  # typed bidirectional in the Espressif symbol
 
     # Power path: battery through the INA226 shunt and a P-FET that turns off when USB is present
     # (USB-or-battery load sharing), USB through a Schottky.
     vshunt = Net("VBAT_SHUNT")
     r(vbat, vshunt, "10m", "Resistor_SMD:R_1206_3216Metric")
     # Battery path must stay <= 50 mOhm (power_sim.py); AO3401A (85 mOhm at -2.5 V) failed.
-    q = DMP1022UFDF()
+    q = Part("ESPFC", "DMP1022UFDF-7")
     q["D"] += vshunt
     q["S"] += vsys
     q["G"] += vbus
@@ -128,12 +92,12 @@ def fc_board():
     d["K"] += vsys
 
     # 3.3 V buck-boost, TPS63802 datasheet Fig. 10-1: VOUT = 0.5 V * (1 + 511k/91k) = 3.31 V.
-    bb = TPS63802()
+    bb = Part("ESPFC", "TPS63802")
     bb["VIN", "EN"] += vsys
     bb["MODE", "AGND", "GND"] += gnd
     bb["PG"] += builtins.NC
     bb["VOUT"] += v33
-    lx = Part("Device", "L", value="0.47u", footprint="Inductor_SMD:L_Coilcraft_XFL4015-xxx")
+    lx = Part("Device", "L", value="0.47u XFL4020-471ME", footprint="Inductor_SMD:L_Coilcraft_XxL4020")
     lx[1] += bb["L1"]
     lx[2] += bb["L2"]
     fb = Net("BB_FB")
@@ -151,7 +115,7 @@ def fc_board():
     buck["GND"] += gnd
     buck["EN"] += p4["EN_DCDC"]
     c(v33, gnd, "4.7u", C0603)
-    l2 = Part("Device", "L", value="2.2u", footprint="Inductor_SMD:L_0806_2016Metric")
+    l2 = Part("Device", "L", value="2.2u DFE201610E-2R2M", footprint="Inductor_SMD:L_Murata_DFE201610P")
     l2[1] += buck["SW"]
     l2[2] += vhp
     hp_fb = Net("HP_FB")
@@ -227,9 +191,14 @@ def fc_board():
         sig[k] += gpio(p4, n)
 
     # IMU on SPI2 (4-wire), DS-000347 section 4.3 caps.
-    imu = ICM42688P()
+    imu = Part("ESPFC", "ICM-42688-P")
     imu["VDD", "VDDIO"] += v33
-    imu["GND", "RESV2", "RESV3", "RESV7", "RESV10", "RESV11", "FSYNC"] += gnd
+    # TDK rev 1.2 allows NC or GND on 2/3/10/11, another source calls them aux-interface pins (VDDIO, not GND):
+    # NC suits both. Pin 9 is FSYNC input or INT2 output, so a P4 GPIO with a pull-down rather than GND.
+    imu["GND", "RESV7"] += gnd
+    imu["RESV2", "RESV3", "RESV10", "RESV11"] += builtins.NC
+    sig["IMU_INT2"] += imu["FSYNC"]
+    r(sig["IMU_INT2"], gnd, "10k")
     c(v33, gnd, "100n")
     c(v33, gnd, "2.2u")
     c(v33, gnd, "10n")
@@ -240,9 +209,11 @@ def fc_board():
     # I2C: barometer (0x46) and battery monitor (0x40).
     r(v33, sig["SDA"], "4.7k")
     r(v33, sig["SCL"], "4.7k")
-    baro = BMP581()
+    baro = Part("ESPFC", "BMP581")
     baro["VDD", "VDDIO", "CSB"] += v33  # CSB high: I2C
-    baro["VSS3", "VSS8", "VSS9", "SDO", "INT"] += gnd  # SDO low: 0x46; INT unused
+    baro["VSS3", "VSS8", "VSS9"] += gnd
+    baro["INT"] += builtins.NC  # unused; Bosch allows DNC
+    r(net("BARO_SDO", baro["SDO"]), gnd, "0")  # I2C address strap: to GND 0x46, move to 3V3 for 0x47
     baro["SCK"] += sig["SCL"]
     baro["SDI"] += sig["SDA"]
     c(v33, gnd, "100n")
@@ -300,6 +271,8 @@ def radio_board():
 
 
 BOARDS = {"fc_board": fc_board, "radio_board": radio_board}
+# Rails fed by a connector, diode, FET or inductor have no power-output pin; KiCad's ERC wants a PWR_FLAG there.
+PWR_FLAGS = {"fc_board": ["GND", "VSYS", "VDD_HP", "VBUS"], "radio_board": ["GND", "3V3"]}
 
 
 def build(name):
@@ -312,9 +285,24 @@ def build(name):
     return circuit
 
 
+def schematic(ckt, name, out=HERE / "out"):
+    """Draw the board as a KiCad schematic sheet, out/<name>/<name>.kicad_sch (auto-placed, net labels, no wires)."""
+    with ckt:  # drawing-only symbols: after the netlist, so the PCB never sees them
+        for rail in PWR_FLAGS[name]:
+            rail_net = Net.get(rail, circuit=ckt)
+            rail_net += Part("power", "PWR_FLAG")[1]
+    ckt.generate_schematic(filepath=str(out / name), top_name=name, title=f"ESP-FC Next {name}", mode="labels")
+    sch = out / name / f"{name}.kicad_sch"
+    # ponytail: schematizer 0.2.0 writes symbol text items unquoted ("(text MIPI DSI/CSI"), which KiCad cannot
+    # load; quote them here until upstream does.
+    sch.write_text(re.sub(r'\(text (?!")([^\n]*)\n', r'(text "\1"\n', sch.read_text()))
+    return sch
+
+
 if __name__ == "__main__":
     (HERE / "out").mkdir(exist_ok=True)
     for name in BOARDS:
         ckt = build(name)
         ckt.ERC()
         ckt.generate_netlist(file_=str(HERE / "out" / f"{name}.net"))
+        schematic(ckt, name)

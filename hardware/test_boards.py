@@ -1,9 +1,12 @@
 """Scripted netlist checks of boards.py (gate G4) plus the ngspice power-path check."""
+import json
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import boards
-import footprints
+import library
 import power_sim
 import pytest
 from skidl.logger import erc_logger
@@ -34,6 +37,17 @@ def two_pin(circuit, kind, a, b):
     return [p for p in circuit.parts if p.name == kind and {p[1].net.name, p[2].net.name} == {a, b}]
 
 
+KICAD_FP = Path("/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints")
+LOCAL_FP = {"ESPFC": library.OUT, "PCM_Espressif": Path(boards.HERE, "lib/espressif/Espressif.pretty")}
+
+
+def pads(footprint):
+    """Pad numbers of a "Library:Name" footprint (KiCad's libraries or ours, as fp-lib-table maps them)."""
+    lib, name = footprint.split(":")
+    text = (LOCAL_FP.get(lib, KICAD_FP / f"{lib}.pretty") / f"{name}.kicad_mod").read_text()
+    return set(re.findall(r'\(pad "([^"]*)"', text)) - {""}
+
+
 def kconfig_defaults(path):
     return {k: int(v) for k, v in re.findall(r"config (\w+)\n.*\n\s+default (\d+)", (ROOT / path).read_text())}
 
@@ -44,6 +58,14 @@ def test_erc_is_clean(circuit):
     erc_logger.warning.reset()
     circuit.ERC()
     assert (erc_logger.error.count, erc_logger.warning.count) == (0, 0)
+
+
+@pytest.mark.parametrize("circuit", [FC, RADIO], ids=["fc", "radio"])
+def test_every_pin_lands_on_a_pad_of_an_existing_footprint(circuit):
+    for part in circuit.parts:
+        assert part.footprint, part.ref
+        missing = {p.num for p in part.pins} - pads(part.footprint)
+        assert not missing, f"{part.ref} {part.name}: pins {missing} have no pad in {part.footprint}"
 
 
 def test_p4_supplies():
@@ -96,6 +118,24 @@ def test_imu_uses_the_spi2_io_mux_pins():
         assert "ICM-42688-P" in {p.part.name for p in boards.gpio(p4, n).net.pins}
 
 
+def test_imu_spare_pins_and_footprint_orientation():
+    (imu,) = [p for p in FC.parts if p.name == "ICM-42688-P"]
+    assert imu["RESV7"].net.name == "GND"
+    assert all(not imu[p].is_connected() or imu[p].net.name not in ("GND", "3V3")
+               for p in ("RESV2", "RESV3", "RESV10", "RESV11"))  # NC: the sources disagree on GND vs VDDIO
+    assert imu["FSYNC"].net.name == "IMU_INT2" and two_pin(FC, "R", "IMU_INT2", "GND")
+    # DS-000347 Fig. 4 (top view) and 10.2: pins 1-4 left top to bottom, 5-7 bottom, 8-11 right bottom to top,
+    # 12-14 top right to left; lead centres +-1.1625 / +-0.9125, pitch 0.5.
+    text = (KICAD_FP / "Package_LGA.pretty" / "LGA-14_3x2.5mm_P0.5mm_LayoutBorder3x4y.kicad_mod").read_text()
+    at = {n: (float(x), float(y)) for n, x, y in re.findall(r'\(pad "(\d+)" smd \w+\s*\(at (\S+) (\S+)\)', text)}
+    side = [-0.75, -0.25, 0.25, 0.75]
+    want = {**{str(i + 1): (-1.1625, y) for i, y in enumerate(side)},
+            **{str(i + 5): (x, 0.9125) for i, x in enumerate([-0.5, 0, 0.5])},
+            **{str(i + 8): (1.1625, y) for i, y in enumerate(reversed(side))},
+            **{str(i + 12): (x, -0.9125) for i, x in enumerate([0.5, 0, -0.5])}}
+    assert at == want
+
+
 def test_firmware_pin_defaults_match_the_boards():
     flight = kconfig_defaults("firmware/flight/main/Kconfig.projbuild")
     radio = kconfig_defaults("firmware/radio/main/Kconfig.projbuild")
@@ -107,7 +147,7 @@ def test_firmware_pin_defaults_match_the_boards():
 
 def test_stack_connector_carries_the_same_signal_on_both_boards():
     for circuit in (FC, RADIO):
-        j = chip(circuit, "J_STACK")
+        (j,) = [p for p in circuit.parts if p.value == "STACK"]
         assert [j[i].net.name for i in range(1, 13)] == boards.STACK
     p4, c5 = chip(FC), chip(RADIO)
     assert boards.gpio(p4, boards.P4["P4_TX"]).net.name == boards.gpio(c5, 12).net.name == "P4_TX"  # C5 U0RXD
@@ -131,15 +171,20 @@ def test_power_path_holds_the_3v3_converter_input_during_a_motor_spike():
                                                    "8": "VSYS"}
 
 
-@pytest.mark.parametrize(("name", "part", "min_gap"), [
-    ("Texas_DLA0010A_VSON-HR-10_3x2mm_P0.5mm", boards.TPS63802, 0.2),
-    ("Bosch_LGA-10_2x2mm_P0.5mm", boards.BMP581, 0.2)])  # Bosch: >= 200 um between pads
-def test_espfc_footprints(name, part, min_gap):
-    text = (footprints.OUT / f"{name}.kicad_mod").read_text()
-    assert text == footprints.FOOTPRINTS[name]  # lib/ESPFC.pretty regenerated
-    assert part().footprint == f"ESPFC:{name}"
+def test_espfc_symbol_library_is_regenerated():
+    assert library.SYM.read_text() == library.symbol_library()
+
+
+@pytest.mark.parametrize(("name", "symbol", "min_gap"), [
+    ("Texas_DLA0010A_VSON-HR-10_3x2mm_P0.5mm", "TPS63802", 0.2),
+    ("Bosch_LGA-10_2x2mm_P0.5mm", "BMP581", 0.2)])  # Bosch: >= 200 um between pads
+def test_espfc_footprints(name, symbol, min_gap):
+    text = (library.OUT / f"{name}.kicad_mod").read_text()
+    assert text == library.FOOTPRINTS[name]  # lib/ESPFC.pretty regenerated
+    _, footprint, _, pins = library.SYMBOLS[symbol]
+    assert footprint == f"ESPFC:{name}"
     pads = re.findall(r'\(pad "(\d+)" smd \w+ \(at (\S+) (\S+)\) \(size (\S+) (\S+)\)', text)
-    assert sorted(int(p[0]) for p in pads) == sorted(int(p.num) for p in part().pins)
+    assert sorted(int(p[0]) for p in pads) == sorted(p[0] for p in pins)
     boxes = [(float(x) - float(w) / 2, float(y) - float(h) / 2, float(x) + float(w) / 2, float(y) + float(h) / 2)
              for _, x, y, w, h in pads]
     for i, a in enumerate(boxes):
@@ -147,3 +192,30 @@ def test_espfc_footprints(name, part, min_gap):
             assert max(b[0] - a[2], a[0] - b[2], b[1] - a[3], a[1] - b[3]) >= min_gap - 1e-9
     (pin1,) = [b for p, b in zip(pads, boxes) if p[0] == "1"]
     assert pin1[0] < 0 and pin1[1] < 0  # pin 1 top left, as both datasheets' top views
+
+
+KICAD_CLI = shutil.which("kicad-cli") or "/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli"
+
+
+def connectivity(netlist):
+    """Each net of a KiCad netlist file as a set of (reference, pin); names ignored, single-pin nets dropped."""
+    nets = (set(re.findall(r'\(node\s*\(ref "([^"]*)"\)\s*\(pin "([^"]*)"\)', blk))
+            for blk in re.split(r"\(net\s", Path(netlist).read_text())[1:])
+    return {frozenset(n) for n in nets if len(n) > 1}
+
+
+@pytest.mark.skipif(not Path(KICAD_CLI).exists(), reason="needs KiCad's kicad-cli")
+@pytest.mark.parametrize("name", list(boards.BOARDS))
+def test_drawn_schematic_loads_passes_kicad_erc_and_matches_the_netlist(name, tmp_path):
+    ckt = boards.build(name)
+    ckt.generate_netlist(file_=str(tmp_path / "skidl.net"))
+    sch = boards.schematic(ckt, name, tmp_path)
+    run = lambda *a: subprocess.run([KICAD_CLI, "sch", *a, str(sch)], capture_output=True, text=True, check=True)
+    run("erc", "--format", "json", "--severity-all", "-o", str(tmp_path / "erc.json"))
+    # Library-table warnings only say this sandbox's KiCad has no global symbol/footprint tables configured.
+    real = [v for s in json.loads((tmp_path / "erc.json").read_text())["sheets"] for v in s["violations"]
+            if v["type"] not in ("lib_symbol_issues", "footprint_link_issues")]
+    assert real == []
+    out = run("export", "netlist", "-o", str(tmp_path / "drawn.net"))
+    assert "annotation" not in out.stdout + out.stderr
+    assert connectivity(tmp_path / "drawn.net") == connectivity(tmp_path / "skidl.net")

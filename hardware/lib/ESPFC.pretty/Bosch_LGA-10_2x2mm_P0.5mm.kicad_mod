@@ -1,6 +1,6 @@
 (footprint "Bosch_LGA-10_2x2mm_P0.5mm"
   (version 20260206)
-  (generator "espfc_footprints")
+  (generator "espfc_library")
   (layer "F.Cu")
   (descr "Bosch BMP581 LGA-10 2x2 mm (BST-BMP581-DS004-13 section 8.2), no solder mask under the sensor")
   (attr smd)

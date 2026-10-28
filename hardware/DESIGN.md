@@ -45,10 +45,15 @@ Sources: ESP32-C5-MINI-1 datasheet v1.4; ESP32-C5 datasheet v1.5; Espressif cert
 
 ## Other parts (pins and application values used in `boards.py`)
 - **ICM-42688-P**: TDK DS-000347 **Rev 1.2** (Digi-Key mirror; TDK's site served a bot check). LGA-14 2.5 x 3 mm.
-  4-wire SPI: CS 12, SCLK 13, SDI 14, SDO 1, INT1 4. Pin 7 RESV must be GND, pin 9 FSYNC to GND when unused,
-  RESV 2/3/10/11 NC or GND (tied to GND). VDD 0.1 + 2.2 uF, VDDIO 10 nF. **Re-check against Rev 1.8 before layout.**
+  4-wire SPI: CS 12, SCLK 13, SDI 14, SDO 1, INT1 4. Pin 7 RESV must be GND. VDD 0.1 + 2.2 uF, VDDIO 10 nF.
+  Rev 1.8 (07/2023) could not be fetched (TDK pages answer 403/bot check). A second, non-TDK document (LCSC-hosted)
+  names pins 2/3 aux I2C (to sensors or VDDIO, not GND) and pin 10 an aux SPI enable, where Rev 1.2 says "NC or GND":
+  pins 2/3/10/11 are left unconnected, which both allow. Pin 9 (FSYNC input / INT2 output) goes to P4 GPIO18 with a
+  10 k pull-down instead of GND. KiCad's `LGA-14_3x2.5mm_P0.5mm_LayoutBorder3x4y` matches Fig. 4 and section 10.2
+  (pin order, lead centres +-1.1625 / +-0.9125); a test checks it.
 - **BMP581**: Bosch BST-BMP581-DS004-13 rev 1.13. LGA-10 2 x 2 mm. I2C: CSB to VDDIO, SDO low = 0x46,
-  unused INT to GND, 100 nF on VDD and VDDIO. Supplies ramping faster than 10 us may need 10 ohm in series (Fig. 28).
+  INT left unconnected (Bosch allows DNC), SDO to GND through a 0 ohm strap (move to 3V3 for 0x47),
+  100 nF on VDD and VDDIO. Supplies ramping faster than 10 us may need 10 ohm in series (Fig. 28).
 - **TPS63802**: TI SLVSEU9D. DLA0010A VSON-HR 3 x 2 mm. Adjustable only, VFB 0.5 V: 511 k / 91 k = 3.31 V
   (R2 <= 100 k). L 0.47 uH (XFL4015-471ME), CIN 10 uF, COUT 22 uF+. 2 A guaranteed for VIN >= 2.3 V;
   UVLO 1.25 V falling. MODE low = power save. Peak switch limit 4 A min.
@@ -62,6 +67,7 @@ Sources: ESP32-C5-MINI-1 datasheet v1.4; ESP32-C5 datasheet v1.5; Espressif cert
 | Flow module CS (PMW3901 shares SPI3) | 6 | VL53L1X on I2C |
 | C5 EN, C5 BOOT (C5 GPIO28), UART to C5 TX/RX | 12, 13, 14/15 | reflash the C5 from the P4 |
 | ESC current, ESC telemetry | 16 (ADC1_CH0), 17 | |
+| IMU INT2/FSYNC | 18 | 10 k pull-down |
 | I2C SDA/SCL (BMP581 0x46, INA226 0x40, flow ToF) | 28/29 | 4.7 k pull-ups |
 | DShot M1-M4 | 45-48 | 4 RMT TX channels |
 | CRSF receiver TX/RX | 50/51 | |
@@ -96,27 +102,36 @@ small pack sags below this regardless of the FC: the 3.3 V/cell low-battery fail
 
 ## Verification (`make hw`)
 `boards.py` writes `out/fc_board.net` and `out/radio_board.net` (stable tags, so KiCad keeps placement across
-regenerations). `test_boards.py`: SKiDL ERC clean on both boards; P4 rails and per-pin decoupling; core-buck
+regenerations) and draws `out/<board>/<board>.kicad_sch`. The sheets are auto-placed with net labels and no wires:
+schematizer's routed mode shorted GND into eight other nets on the flight board, which the netlist comparison below
+caught. PWR_FLAGs are added only to the sheets. `test_boards.py`: SKiDL ERC clean on both boards; P4 rails and per-pin decoupling; core-buck
 feedback populated (499 k / 499 k / 22 pF, 1.2 V) and wired to FB_DCDC/EN_DCDC; 3.3 V divider; straps, CHIP_PU RC,
 FLASH_CS pull-up; IMU on SPI2 IO MUX; firmware Kconfig pin defaults equal the board nets on both chips; stack
-connector identical on both boards with the UART crossed; C5 link off strapping pins; power path vs ngspice. Five
-mutations (FB resistor, GPIO36 pull-up, shunt value, C5 pin, FB_DCDC wire) each fail a test.
+connector identical on both boards with the UART crossed; C5 link off strapping pins; power path vs ngspice; every
+symbol pin has a pad in an existing footprint; ICM footprint orientation; ESPFC library regenerated; each drawn
+sheet loads in KiCad, passes KiCad's ERC and exports a netlist identical in connectivity to SKiDL's. Mutations
+(FB resistor, GPIO36 pull-up, shunt value, C5 pin, FB_DCDC wire, wrong footprint, missing footprint, routed sheets,
+unquoted symbol text, a missing PWR_FLAG) each fail a test.
 
 ## Libraries
 `lib/espressif/`: Espressif official KiCad symbols (ESP32-P4X, ESP32-C5-MINI-1) and footprints, CC-BY-SA 4.0 with
 the KiCad design exception (`LICENSE.md`, upstream commit in `UPSTREAM`). Other parts come from KiCad's own library;
-parts missing there (ICM-42688-P, BMP581, TPS63802, DMP1022UFDF) are defined in `boards.py` from their datasheets.
-`footprints.py` writes `lib/ESPFC.pretty` (BMP581: Bosch Fig. 30 + section 8.2, pads +25 um, mask opening over
-the body; TPS63802: TI DLA0010A example board layout); `fp-lib-table` maps `ESPFC` and `PCM_Espressif` for the
-KiCad project. Tests check pad count vs symbol, >= 0.2 mm pad gaps and pin 1 position. The P4X symbol
-types VDD_ANA and VDD_BAT as bidirectional; `boards.py` overrides them to power inputs.
+parts missing there (ICM-42688-P, BMP581, TPS63802, DMP1022UFDF) are KiCad symbols in `lib/ESPFC.kicad_sym`, and
+`library.py` writes them and `lib/ESPFC.pretty` (BMP581: Bosch Fig. 30 + section 8.2, pads +25 um, mask opening over
+the body; TPS63802: TI DLA0010A example board layout); `fp-lib-table` and `sym-lib-table` map
+the local libraries for a KiCad project in `hardware/`. Tests check pad count vs symbol, >= 0.2 mm pad gaps and pin 1
+position. Local change to the vendored Espressif symbols: P4 VDD_ANA and VDD_BAT retyped from bidirectional to power
+input (recorded in `UPSTREAM`). Inductors: Coilcraft XFL4020-471ME (TI lists XFL4015-471ME; KiCad has the 4020
+land pattern) and Murata DFE201610E-2R2M.
 
 ## Open items
-- `ESPFC` footprints are drawn from the drawings but not yet checked against a physical part or a fab's DFM.
+- `ESPFC` footprints follow the datasheet drawings; not yet checked against a physical part or a fab's DRC rules
+  (needs the PCB layout).
+- ICM-42688-P against TDK Rev 1.8 once the document can be downloaded.
 - GPIO34 level: only matters once the JTAG-select eFuse is burned; confirm with the P4 TRM.
 - VDD_FLASH_IO fed from 3V3 directly (allowed 1.65-3.6 V); the EV board's choice not confirmed.
 - Reset supervisor vs RC only (HDG suggests a ~3.0 V reset IC for battery supplies).
 - Crystal load caps 12 pF assume CL 10 pF and ~4 pF stray; set from the chosen crystal.
 - Stack connector part and pitch; flow/ToF module connector; ESC connector pinout (varies by ESC vendor).
-- Graphical KiCad schematic sheets: not generated yet (netlist only); layout imports the netlist.
+- Sheets are machine-placed and dense (one A3 page per board); connectivity is verified, readability is not.
 - Not simulated: converter loop stability, C5 TX burst transients on 3V3, layout parasitics.
