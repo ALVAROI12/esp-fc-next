@@ -12,9 +12,9 @@ Fixed 64-byte SPI transaction. The P4 is master and clocks one frame each way pe
 | Offset | Size | Field | Notes |
 | --- | --- | --- | --- |
 | 0 | 1 | magic | `0xA5` |
-| 1 | 1 | type | 0 IDLE, 1 CRTP, 2 SWARM_STATUS |
+| 1 | 1 | type | 0 IDLE, 1 CRTP, 2 SWARM_STATUS, 3 CRTP_PEER (ground C5 <-> PC only) |
 | 2 | 2 | seq | per-direction counter, wraps; gaps = lost frames (diagnostic only) |
-| 4 | 1 | len | IDLE 0, CRTP <= 31, SWARM_STATUS 20 |
+| 4 | 1 | len | IDLE 0, CRTP <= 31, SWARM_STATUS 20, CRTP_PEER <= 32 (peer id + CRTP) |
 | 5 | len | payload | CRTP: raw CRTP packet (header byte + up to 30 data bytes), unchanged for cflib/Crazyswarm2 |
 | 5+len | 2 | crc | CRC-16/CCITT-FALSE (poly 0x1021, init 0xFFFF) over bytes 0..4+len |
 | ... | | zero | tail is zero |
@@ -48,7 +48,7 @@ broadcast, so the swarm status and swarm commands use an application-level envel
 | 0 | 1 | version (1) |
 | 1 | 1 | sender id |
 | 2 | 4 | message counter (strictly increasing per sender) |
-| 6 | n | AES-128-CCM ciphertext of one SPI frame payload type byte + payload |
+| 6 | n | AES-128-CCM ciphertext of the plaintext: SWARM_STATUS = type + status; CRTP = type + destination id + raw CRTP |
 | 6+n | 8 | CCM tag |
 
 - Nonce (13 bytes): network id (4) + sender id (1) + counter (4) + zero (4). A nonce never repeats under
@@ -82,11 +82,17 @@ broadcast, so the swarm status and swarm commands use an application-level envel
 Code: `include/fc_radio.h`, `src/fc_radio.c` (portable, host-tested in `tests/test_radio.c`), wired in
 `firmware/radio/main/main.c`.
 
-- Air to P4: `fc_radio_from_air` opens the envelope, then encodes the plaintext (type byte + payload) as one SPI
-  frame with the C5's own per-direction `seq`. It drops: failed authentication or replay, IDLE or unknown types,
-  oversize payloads, and CRTP from any sender other than id 0 (ground).
-- P4 to air: `fc_radio_to_air` decodes one SPI frame and seals non-IDLE frames as a broadcast with the C5's id.
-  Corrupt frames are dropped and counted.
+- Addressing: every envelope is an ESP-NOW broadcast, so CRTP carries an authenticated destination id. It is a
+  drone id, 255 (`FC_RADIO_ALL`, e.g. Crazyswarm2 broadcast takeoff/land) or 0 (ground) for telemetry. Radio
+  ids are 0-254; 0 is the ground C5.
+- Air to P4: `fc_radio_from_air` opens the envelope and encodes it as one SPI frame with the C5's own
+  per-direction `seq`. CRTP for another member is ignored silently. A drone delivers CRTP only from id 0 as a
+  plain CRTP frame. The ground delivers drone CRTP to the PC as CRTP_PEER, tagged with the sender. It drops and
+  counts: failed authentication or replay; IDLE, CRTP_PEER or unknown types on air; bad sizes; CRTP to a drone
+  from any sender but id 0.
+- P4/PC to air: `fc_radio_to_air` decodes one SPI frame and seals it. A drone seals CRTP to the ground; the
+  ground seals CRTP_PEER (dest + CRTP); status is sealed unchanged. Corrupt frames, and the other end's CRTP
+  form (a drone sending CRTP_PEER, the ground sending unaddressed CRTP), are dropped and counted.
 - Counter persistence: counters are reserved in blocks of 4096 and stored in NVS before use. A reboot resumes at
   the stored limit, so it never reuses a nonce. Sending stalls instead of overrunning the reservation. At 50 Hz a
   block lasts 80 s, about 1100 NVS writes per day. When the 32-bit space is spent it stops sending (rekey).

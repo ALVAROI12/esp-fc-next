@@ -36,7 +36,11 @@ static void test_encode_rejects_bad_type_and_oversize(void)
     TEST_ASSERT_FALSE(fc_link_encode(&f, buf));
     f = (fc_link_frame_t){.type = FC_LINK_IDLE, .len = 1};
     TEST_ASSERT_FALSE(fc_link_encode(&f, buf));
+    f = (fc_link_frame_t){.type = FC_LINK_CRTP_PEER, .len = 33}; /* peer id + 31-byte CRTP is the maximum */
+    TEST_ASSERT_FALSE(fc_link_encode(&f, buf));
     TEST_ASSERT_EQUAL(0x11, buf[0]); /* nothing written */
+    f.len = 32;
+    TEST_ASSERT_TRUE(fc_link_encode(&f, buf));
 }
 
 static void test_decode_rejects_each_corruption(void)

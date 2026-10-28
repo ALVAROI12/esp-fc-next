@@ -26,6 +26,7 @@ typedef enum {
     FC_LINK_IDLE = 0,       /* keep-alive, empty payload */
     FC_LINK_CRTP = 1,       /* one raw CRTP packet: header byte + up to 30 data bytes */
     FC_LINK_SWARM_STATUS = 2,
+    FC_LINK_CRTP_PEER = 3,  /* ground C5 <-> PC only: peer id (dest out, sender in) + raw CRTP */
     FC_LINK_TYPE_COUNT
 } fc_link_type_t;
 

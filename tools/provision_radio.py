@@ -2,7 +2,7 @@
 """NVS image with the C5 link key, network id and radio id (docs/protocols.md section 5).
 
 usage: tools/provision_radio.py --id 1 [--net 0x5EEDF00D]
-  id 0 is the ground station (the only sender whose CRTP commands drones accept).
+  id 0 is the ground station (the only sender whose CRTP commands drones accept); 255 means "all drones".
 
 The group key lives in secrets/link_key.hex (created once, git-ignored, mode 0600) and is never printed.
 Output: build/provision/radio-<id>.bin. Flash it to the default single-app table's nvs partition:
@@ -37,11 +37,11 @@ def group_key() -> str:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--id", type=int, required=True, help="radio id 0-255 (0 = ground station)")
+    ap.add_argument("--id", type=int, required=True, help="radio id 0-254 (0 = ground station)")
     ap.add_argument("--net", type=lambda s: int(s, 0), default=0x5EEDF00D, help="network id (u32)")
     a = ap.parse_args()
-    if not 0 <= a.id <= 255 or not 0 <= a.net <= 0xFFFFFFFF:
-        sys.exit("--id must be 0-255 and --net a u32")
+    if not 0 <= a.id <= 254 or not 0 <= a.net <= 0xFFFFFFFF:
+        sys.exit("--id must be 0-254 (255 = all drones) and --net a u32")
 
     out = ROOT / "build" / "provision"
     out.mkdir(parents=True, exist_ok=True)

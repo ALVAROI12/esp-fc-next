@@ -17,7 +17,8 @@
 extern "C" {
 #endif
 
-#define FC_RADIO_GROUND_ID 0u /* only this sender may deliver CRTP (commands) */
+#define FC_RADIO_GROUND_ID 0u /* only this sender may deliver CRTP (commands) to drones */
+#define FC_RADIO_ALL 0xFFu      /* CRTP destination: every drone (not a valid radio id) */
 /* Envelope counters are reserved in blocks persisted before use, so a reboot never reuses a nonce. */
 #define FC_RADIO_COUNTER_BLOCK 4096u
 #define FC_RADIO_ENV_MAX (FC_LINK_ENV_HEADER_SIZE + 1u + FC_LINK_MAX_PAYLOAD + FC_LINK_ENV_TAG_SIZE)
@@ -42,7 +43,12 @@ uint32_t fc_radio_reserve_due(const fc_radio_t *r);
 /* Call after limit returned by fc_radio_reserve_due() is durably stored. */
 void fc_radio_reserved(fc_radio_t *r, uint32_t limit);
 
-/* Air -> P4: authenticates one envelope and encodes it as one SPI frame. False (counted) when rejected. */
+/* Air plaintext: SWARM_STATUS = [type][status]; CRTP = [type][dest][raw CRTP], dest = a radio id or FC_RADIO_ALL.
+ * A drone's C5 exchanges FC_LINK_CRTP frames with its P4 (telemetry goes to the ground); the ground C5 (id 0)
+ * exchanges FC_LINK_CRTP_PEER frames with the PC (dest on the way out, sender on the way in). */
+
+/* Air -> P4/PC: authenticates one envelope and encodes it as one SPI frame. False when it is not for this
+ * radio, or rejected (counted). */
 bool fc_radio_from_air(fc_radio_t *r, const uint8_t *env, size_t n, uint8_t frame[FC_LINK_FRAME_SIZE]);
 /* P4 -> air: seals one SPI frame. Returns envelope length (<= FC_RADIO_ENV_MAX); 0 for IDLE, a rejected
  * frame (counted) or no counter reservation left. */

@@ -8,6 +8,7 @@ static const uint8_t maxLen[FC_LINK_TYPE_COUNT] = {
     [FC_LINK_IDLE] = 0,
     [FC_LINK_CRTP] = 31, /* CRTP raw: header + CRTP_MAX_DATA_SIZE */
     [FC_LINK_SWARM_STATUS] = FC_LINK_STATUS_SIZE,
+    [FC_LINK_CRTP_PEER] = 32, /* peer id + CRTP raw */
 };
 
 static void put16(uint8_t *p, uint16_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); }

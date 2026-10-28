@@ -31,17 +31,24 @@ bool fc_radio_from_air(fc_radio_t *r, const uint8_t *env, size_t n, uint8_t fram
 {
     uint8_t plain[FC_LINK_ENV_MAX_PLAIN], sender;
     int len = fc_link_open(&r->aead, env, n, &sender, plain);
+    bool ground = r->id == FC_RADIO_GROUND_ID, ok = false;
     fc_link_frame_t f = {.seq = r->spiSeq};
-    bool ok = len >= 1;
-    if (ok) {
-        f.type = plain[0];
+    if (len >= 3 && len - 1 <= (int)FC_LINK_MAX_PAYLOAD && plain[0] == FC_LINK_CRTP) {
+        if (plain[1] != r->id && plain[1] != FC_RADIO_ALL) return false; /* for another member */
+        /* Group key: any member could seal CRTP, so drones take commands only from the ground; the ground
+         * hands drone telemetry to the PC tagged with its sender. */
+        f.type = ground ? FC_LINK_CRTP_PEER : FC_LINK_CRTP;
+        f.len = (uint8_t)(ground ? len - 1 : len - 2);
+        if (ground) f.payload[0] = sender;
+        memcpy(f.payload + (ground ? 1 : 0), plain + 2, (size_t)len - 2);
+        ok = ground ? sender != FC_RADIO_GROUND_ID : sender == FC_RADIO_GROUND_ID;
+    } else if (len >= 1 && len - 1 <= (int)FC_LINK_MAX_PAYLOAD && plain[0] == FC_LINK_SWARM_STATUS) {
+        f.type = FC_LINK_SWARM_STATUS;
         f.len = (uint8_t)(len - 1);
-        memcpy(f.payload, plain + 1, f.len <= FC_LINK_MAX_PAYLOAD ? f.len : 0);
-        /* Group key: any member could seal CRTP, so commands are accepted only from the ground id. */
-        ok = f.len <= FC_LINK_MAX_PAYLOAD && (f.type != FC_LINK_CRTP || sender == FC_RADIO_GROUND_ID) &&
-             f.type != FC_LINK_IDLE && fc_link_encode(&f, frame);
+        memcpy(f.payload, plain + 1, f.len);
+        ok = true;
     }
-    if (!ok) {
+    if (!ok || !fc_link_encode(&f, frame)) { /* forged/IDLE/unknown type, bad size, CRTP from a non-ground */
         r->rejected++;
         return false;
     }
@@ -52,15 +59,27 @@ bool fc_radio_from_air(fc_radio_t *r, const uint8_t *env, size_t n, uint8_t fram
 size_t fc_radio_to_air(fc_radio_t *r, const uint8_t *frame, size_t n, uint8_t env[FC_RADIO_ENV_MAX])
 {
     fc_link_frame_t f;
-    if (fc_link_decode(frame, n, &f) != FC_LINK_OK) {
+    bool ground = r->id == FC_RADIO_GROUND_ID;
+    uint8_t plain[2 + FC_LINK_MAX_PAYLOAD];
+    size_t m = 0;
+    if (fc_link_decode(frame, n, &f) == FC_LINK_OK) {
+        if (f.type == FC_LINK_IDLE) return 0;
+        plain[0] = f.type == FC_LINK_CRTP_PEER ? FC_LINK_CRTP : f.type;
+        if (f.type == FC_LINK_SWARM_STATUS || (f.type == FC_LINK_CRTP_PEER && ground && f.len >= 2)) {
+            memcpy(plain + 1, f.payload, f.len); /* status, or dest + CRTP from the PC */
+            m = 1u + f.len;
+        } else if (f.type == FC_LINK_CRTP && !ground && f.len >= 1) {
+            plain[1] = FC_RADIO_GROUND_ID; /* drone telemetry */
+            memcpy(plain + 2, f.payload, f.len);
+            m = 2u + f.len;
+        }
+    }
+    if (!m) { /* corrupt, or the wrong CRTP form for this end */
         r->rejected++;
         return 0;
     }
-    if (f.type == FC_LINK_IDLE || r->counter >= r->counterLimit) return 0;
-    uint8_t plain[1 + FC_LINK_MAX_PAYLOAD];
-    plain[0] = f.type;
-    memcpy(plain + 1, f.payload, f.len);
-    size_t out = fc_link_seal(&r->aead, r->id, r->counter, plain, 1u + f.len, env, FC_RADIO_ENV_MAX);
+    if (r->counter >= r->counterLimit) return 0;
+    size_t out = fc_link_seal(&r->aead, r->id, r->counter, plain, m, env, FC_RADIO_ENV_MAX);
     if (out) r->counter++;
     return out;
 }
