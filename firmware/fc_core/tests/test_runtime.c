@@ -10,6 +10,7 @@
 #include "pm_esplane.h"
 #include "queue.h"
 #include "system.h"
+#include "task.h"
 #include "unity.h"
 
 /* ---- fakes for the FreeRTOS queue, commander and system modules ---- */
@@ -38,6 +39,9 @@ BaseType_t xQueueReceive(QueueHandle_t q, void *item, TickType_t wait)
     return pdTRUE;
 }
 
+static TickType_t rtosTick;
+TickType_t xTaskGetTickCount(void) { return rtosTick; }
+
 static setpoint_t commanded;
 static bool armedFake;
 void commanderGetSetpoint(setpoint_t *setpoint, const state_t *state)
@@ -56,6 +60,7 @@ static state_t st;
 
 static void tick(bool estop)
 {
+    rtosTick++; /* 1 kHz RTOS tick, same as the IMU-driven loop */
     fc_host_advance_time_us(1000000u / FC_STEP_RATE_HZ);
     fcRuntimeStep(&level, &sp, &st, estop);
 }
@@ -113,14 +118,35 @@ static void test_measurements_from_other_tasks_reach_fc_step(void)
 static void test_only_new_setpoints_refresh_the_command_watchdog(void)
 {
     ready();
-    commanded.timestamp = 100;
     for (unsigned i = 0; i < FC_MS_TO_TICKS(FC_SETPOINT_TIMEOUT_STABILIZE_MS + 100); i++) {
-        commanded.timestamp++;
+        commanded.timestamp = rtosTick;
         tick(false);
     }
     TEST_ASSERT_EQUAL(modeAbs, fc_active_setpoint()->mode.x);
     for (unsigned i = 0; i < FC_MS_TO_TICKS(FC_SETPOINT_TIMEOUT_STABILIZE_MS + 100); i++) tick(false);
     TEST_ASSERT_EQUAL(modeDisable, fc_active_setpoint()->mode.x); /* stale packet: level, no XY hold */
+    /* After its own timeout the commander hands back nullSetpoint (timestamp 0) or a back-dated copy
+     * (commanderNotifySetpointsStop): a changed timestamp, but not a new packet. */
+    commanded.timestamp = 0;
+    for (unsigned i = 0; i < 10; i++) tick(false);
+    TEST_ASSERT_EQUAL(modeDisable, fc_active_setpoint()->mode.x);
+    commanded.timestamp = rtosTick - pdMS_TO_TICKS(600);
+    for (unsigned i = 0; i < 10; i++) tick(false);
+    TEST_ASSERT_EQUAL(modeDisable, fc_active_setpoint()->mode.x);
+}
+
+/* The arm source is a level (forceArm param): a refused or supervisor-cancelled arm must not retry itself. */
+static void test_arm_is_edge_triggered(void)
+{
+    armedFake = true;
+    tick(false); /* calibrating: refused */
+    ready();
+    TEST_ASSERT_FALSE(fc_is_armed()); /* still requested, but no automatic re-arm once it becomes possible */
+    armedFake = false;
+    tick(false);
+    armedFake = true;
+    tick(false);
+    TEST_ASSERT_TRUE(fc_is_armed());
 }
 
 static void test_arm_follows_system_and_emergency_stop_latches(void)
@@ -179,6 +205,9 @@ static void test_safe_mode_param_applies_while_disarmed(void)
     tofMeasurement_t tof = {.distance = 0, .stdDev = 0.01f};
     TEST_ASSERT_TRUE(fcRuntimeEnqueuePosition(&pos));
     TEST_ASSERT_TRUE(fcRuntimeEnqueueTof(&tof));
+    armedFake = false;
+    tick(false);
+    armedFake = true;
     tick(false);
     TEST_ASSERT_TRUE(fc_is_armed());
     TEST_ASSERT_EQUAL(FC_VAR_OK, fc_param_set("fcRun", "safeMode", 0));
@@ -196,6 +225,7 @@ int main(void)
     RUN_TEST(test_measurements_from_other_tasks_reach_fc_step);
     RUN_TEST(test_only_new_setpoints_refresh_the_command_watchdog);
     RUN_TEST(test_arm_follows_system_and_emergency_stop_latches);
+    RUN_TEST(test_arm_is_edge_triggered);
     RUN_TEST(test_battery_voltage_reaches_fc_step);
     RUN_TEST(test_step_timing_counters);
     RUN_TEST(test_safe_mode_param_applies_while_disarmed);

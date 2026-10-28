@@ -7,6 +7,7 @@
 
 #include "FreeRTOS.h"
 #include "queue.h"
+#include "task.h"
 
 #include "commander.h"
 #include "fc_step.h"
@@ -27,6 +28,7 @@ static StaticQueue_t queueStorage;
 static uint8_t queueBuffer[FC_RUNTIME_QUEUE_LEN * sizeof(meas_t)];
 static QueueHandle_t queue;
 static uint32_t lastSetpointTimestamp;
+static bool lastSystemArmed;
 static uint32_t batteryTick;
 static uint32_t stepUs, stepMaxUs, overruns; /* timing budget (G3): fc_step cost per tick */
 static uint8_t safeMode; /* param fcRun.safeMode: latched hold-and-land supervisor, applied while disarmed */
@@ -34,6 +36,8 @@ static uint8_t safeMode; /* param fcRun.safeMode: latched hold-and-land supervis
 void fcRuntimeInit(void)
 {
     if (!queue) queue = xQueueCreateStatic(FC_RUNTIME_QUEUE_LEN, sizeof(meas_t), queueBuffer, &queueStorage);
+    lastSetpointTimestamp = 0;
+    lastSystemArmed = false;
     fc_init();
 }
 
@@ -57,9 +61,13 @@ void fcRuntimeStep(const sensorData_t *sensors, setpoint_t *setpoint, state_t *s
         else fc_push_flow(m.a, m.b, m.c, m.std);
     }
 
-    /* Only new packets refresh fc_step's command watchdog; the commander's own timeout handling is bypassed. */
+    /* Only new packets refresh fc_step's command watchdog. After its own timeouts the commander returns
+     * nullSetpoint (timestamp 0) or a back-dated copy: a changed timestamp but no packet, so also require
+     * the stamp to be recent. ponytail: high-level commander setpoints carry no stamp and are never
+     * forwarded; fc_step mode needs streamed low-level setpoints (cmdPosition / cmdFullState). */
     commanderGetSetpoint(setpoint, state);
-    if (setpoint->timestamp != lastSetpointTimestamp) {
+    if (setpoint->timestamp != lastSetpointTimestamp &&
+        xTaskGetTickCount() - setpoint->timestamp <= pdMS_TO_TICKS(FC_SETPOINT_TIMEOUT_STABILIZE_MS)) {
         lastSetpointTimestamp = setpoint->timestamp;
         fc_set_setpoint(setpoint);
     }
@@ -73,8 +81,12 @@ void fcRuntimeStep(const sensorData_t *sensors, setpoint_t *setpoint, state_t *s
 
     if (!fc_is_armed()) fc_set_failsafe_enabled(safeMode != 0);
     if (emergencyStop) fc_emergency_stop(); /* latched until reboot, unlike the stabilizer flag */
+    /* systemIsArmed() is a level (forceArm param). Arm only on its rising edge, so a refused arm or a
+     * supervisor disarm is never retried behind the operator's back; dropping it always disarms. */
     bool armed = systemIsArmed();
-    if (armed != fc_is_armed()) fc_arm(armed); /* fc_arm refuses (and keeps refusing) unsafe arms */
+    if (armed && !lastSystemArmed) fc_arm(true);
+    if (!armed && fc_is_armed()) fc_arm(false);
+    lastSystemArmed = armed;
 
     /* Driver samples are bias-corrected, scaled and gravity-aligned; its LPF is compiled out in this mode
      * (sensors_mpu6050_hm5883L_ms5611.c) because fc_step applies the same 80/30 Hz filters. */

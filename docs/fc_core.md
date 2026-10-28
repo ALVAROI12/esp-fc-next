@@ -15,10 +15,14 @@ the linker drops fc_step there; the real link check is the ESP32-S3 drone target
 
 - `estimatorEnqueuePosition/Pose/TOF/Flow` hand measurements to one static FreeRTOS queue that the
   stabilizer drains each tick into `fc_push_*` (pose keeps position only; TDOA/height/yaw-error unused).
-- Only commander setpoints with a new timestamp reach `fc_set_setpoint`, so fc_step's own watchdog
-  and failsafe run instead of the commander timeouts.
-- `systemIsArmed()` drives `fc_arm()` (which can refuse); the stabilizer emergency stop latches
-  `fc_emergency_stop()` until reboot. fc_step drives the motors; `state` is copied back for logs.
+- Only commander setpoints with a new and recent (< 500 ms old) timestamp reach `fc_set_setpoint`,
+  so fc_step's own watchdog and failsafe run instead of the commander timeouts; the commander's
+  timeout `nullSetpoint` is never mistaken for a packet. High-level commander setpoints carry no
+  timestamp and are not forwarded: stream low-level setpoints (cmdPosition / cmdFullState).
+- Arming follows the rising edge of `systemIsArmed()` (a level, the `forceArm` param), so a refused
+  arm or a supervisor disarm is not retried automatically; toggle it to re-arm. The stabilizer
+  emergency stop latches `fc_emergency_stop()` until reboot. fc_step drives the motors; `state` is
+  copied back for logs.
 
 - The ESP-Drone sensor driver keeps bias, scale and gravity alignment but skips its 80/30 Hz LPF in this
   mode; fc_step applies the same filters, so samples are filtered once.
