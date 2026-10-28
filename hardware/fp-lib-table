@@ -1,0 +1,5 @@
+(fp_lib_table
+  (version 7)
+  (lib (name "ESPFC")(type "KiCad")(uri "${KIPRJMOD}/lib/ESPFC.pretty")(options "")(descr "ESP-FC Next footprints (footprints.py)"))
+  (lib (name "PCM_Espressif")(type "KiCad")(uri "${KIPRJMOD}/lib/espressif/Espressif.pretty")(options "")(descr "Espressif official"))
+)

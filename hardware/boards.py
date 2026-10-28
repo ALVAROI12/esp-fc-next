@@ -50,6 +50,14 @@ def BMP581():
         (6, "CSB", T.INPUT), (7, "INT", T.OUTPUT), (8, "VSS8", T.PWRIN), (9, "VSS9", T.PWRIN), (10, "VDD", T.PWRIN)])()
 
 
+def DMP1022UFDF():
+    """P-FET, Diodes DS36624 rev 6-2: 19 mOhm max at VGS -2.5 V, 26 at -1.8 V; VGS(th) -0.35 to -0.8 V.
+    Pads as KiCad's footprint: 1, 2, 5, 6 and paddle 7 drain, 3 gate, 4 and pad 8 source."""
+    return custom("DMP1022UFDF-7", "Package_DFN_QFN:Diodes_UDFN2020-6_Type-F", [
+        (1, "D", T.PASSIVE), (2, "D", T.PASSIVE), (3, "G", T.INPUT), (4, "S", T.PASSIVE), (5, "D", T.PASSIVE),
+        (6, "D", T.PASSIVE), (7, "D", T.PASSIVE), (8, "S", T.PASSIVE)], ref="Q")()
+
+
 def TPS63802():
     return custom("TPS63802", "ESPFC:Texas_DLA0010A_VSON-HR-10_3x2mm_P0.5mm", [
         (1, "EN", T.INPUT), (2, "MODE", T.INPUT), (3, "AGND", T.PWRIN), (4, "FB", T.INPUT), (5, "PG", T.OPENCOLL),
@@ -109,9 +117,8 @@ def fc_board():
     # (USB-or-battery load sharing), USB through a Schottky.
     vshunt = Net("VBAT_SHUNT")
     r(vbat, vshunt, "10m", "Resistor_SMD:R_1206_3216Metric")
-    # Battery path must stay <= 50 mOhm (power_sim.py); AO3401A (85 mOhm at -2.5 V) failed. Part not chosen yet.
-    q = Part("Device", "Q_PMOS", ref="Q1", value="PMOS Rds(on)<=30m@Vgs-2.5V",
-             footprint="Package_TO_SOT_SMD:SOT-23")
+    # Battery path must stay <= 50 mOhm (power_sim.py); AO3401A (85 mOhm at -2.5 V) failed.
+    q = DMP1022UFDF()
     q["D"] += vshunt
     q["S"] += vsys
     q["G"] += vbus

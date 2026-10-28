@@ -114,7 +114,7 @@ hw-setup:
 	uv pip install --python hardware/.venv/bin/python -r hardware/requirements.txt
 
 hw:
-	cd hardware && .venv/bin/python boards.py && .venv/bin/python -m pytest -q -p no:cacheprovider test_boards.py
+	cd hardware && .venv/bin/python footprints.py && .venv/bin/python boards.py && .venv/bin/python -m pytest -q -p no:cacheprovider test_boards.py
 
 # Gate G1 math-model report -> sim/reports/g1/README.md (non-zero exit if the gate fails).
 g1:

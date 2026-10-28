@@ -74,6 +74,10 @@ microSD (SDMMC slot 0) left out of the first board: not needed for flight; GPIO3
 
 ## Power path and 3.3 V budget
 Battery -> 10 mOhm INA226 shunt -> P-FET (off when USB VBUS is present) -> VSYS; USB VBUS -> Schottky -> VSYS.
+P-FET: **Diodes DMP1022UFDF-7** (LCSC C155358), U-DFN2020-6 Type F; DS36624 rev 6-2: Rds(on) max 19 mOhm at
+VGS -2.5 V and 26 mOhm at -1.8 V (ID -4 A), VGS(th) -0.35 to -0.8 V, -12 V / +-8 V. No SOT-23 part checked met
+<= 30 mOhm max at -2.5 V (Si2333DDS 40, SSM3J328R 39.7, DMP1045U 45, AO3415A 53). Alternative: Vishay SiA447DJ
+(19.4 mOhm max at -2.5 V, but 34.4 at -1.8 V). The simulation budgets 30 mOhm for the FET (hot-Rds margin).
 VSYS (10 uF + 100 uF) -> TPS63802 -> 3V3 -> TLV62569 -> VDD_HP.
 
 Budget (peak, simultaneous): P4 380 mA (HDG minimum incl. flash/PSRAM) + C5 426 mA + IMU/baro/flash/INA226 ~20 mA +
@@ -101,12 +105,14 @@ mutations (FB resistor, GPIO36 pull-up, shunt value, C5 pin, FB_DCDC wire) each 
 ## Libraries
 `lib/espressif/`: Espressif official KiCad symbols (ESP32-P4X, ESP32-C5-MINI-1) and footprints, CC-BY-SA 4.0 with
 the KiCad design exception (`LICENSE.md`, upstream commit in `UPSTREAM`). Other parts come from KiCad's own library;
-parts missing there (ICM-42688-P, BMP581, TPS63802) are defined in `boards.py` from their datasheets. The P4X symbol
+parts missing there (ICM-42688-P, BMP581, TPS63802, DMP1022UFDF) are defined in `boards.py` from their datasheets.
+`footprints.py` writes `lib/ESPFC.pretty` (BMP581: Bosch Fig. 30 + section 8.2, pads +25 um, mask opening over
+the body; TPS63802: TI DLA0010A example board layout); `fp-lib-table` maps `ESPFC` and `PCM_Espressif` for the
+KiCad project. Tests check pad count vs symbol, >= 0.2 mm pad gaps and pin 1 position. The P4X symbol
 types VDD_ANA and VDD_BAT as bidirectional; `boards.py` overrides them to power inputs.
 
 ## Open items
-- Battery-path P-FET part: needs Rds(on) <= 30 mOhm at VGS = -2.5 V in SOT-23 (placeholder `Q_PMOS`).
-- Footprints `ESPFC:` for BMP581 (datasheet section 8.2) and TPS63802 DLA0010A: not in KiCad, draw before layout.
+- `ESPFC` footprints are drawn from the drawings but not yet checked against a physical part or a fab's DFM.
 - GPIO34 level: only matters once the JTAG-select eFuse is burned; confirm with the P4 TRM.
 - VDD_FLASH_IO fed from 3V3 directly (allowed 1.65-3.6 V); the EV board's choice not confirmed.
 - Reset supervisor vs RC only (HDG suggests a ~3.0 V reset IC for battery supplies).

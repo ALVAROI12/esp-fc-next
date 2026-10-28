@@ -3,6 +3,7 @@ import re
 from pathlib import Path
 
 import boards
+import footprints
 import power_sim
 import pytest
 from skidl.logger import erc_logger
@@ -124,3 +125,25 @@ def test_power_path_holds_the_3v3_converter_input_during_a_motor_spike():
     assert vsys >= power_sim.VIN_FULL_LOAD
     (shunt,) = two_pin(FC, "R", "VBAT", "VBAT_SHUNT")
     assert value(shunt) <= 0.01  # what the simulation assumed
+    q = chip(FC, "Q1")  # DMP1022UFDF: 19 mOhm max at -2.5 V, inside the simulated 30 mOhm
+    assert {p.num: p.net.name for p in q.pins} == {"1": "VBAT_SHUNT", "2": "VBAT_SHUNT", "3": "VBUS", "4": "VSYS",
+                                                   "5": "VBAT_SHUNT", "6": "VBAT_SHUNT", "7": "VBAT_SHUNT",
+                                                   "8": "VSYS"}
+
+
+@pytest.mark.parametrize(("name", "part", "min_gap"), [
+    ("Texas_DLA0010A_VSON-HR-10_3x2mm_P0.5mm", boards.TPS63802, 0.2),
+    ("Bosch_LGA-10_2x2mm_P0.5mm", boards.BMP581, 0.2)])  # Bosch: >= 200 um between pads
+def test_espfc_footprints(name, part, min_gap):
+    text = (footprints.OUT / f"{name}.kicad_mod").read_text()
+    assert text == footprints.FOOTPRINTS[name]  # lib/ESPFC.pretty regenerated
+    assert part().footprint == f"ESPFC:{name}"
+    pads = re.findall(r'\(pad "(\d+)" smd \w+ \(at (\S+) (\S+)\) \(size (\S+) (\S+)\)', text)
+    assert sorted(int(p[0]) for p in pads) == sorted(int(p.num) for p in part().pins)
+    boxes = [(float(x) - float(w) / 2, float(y) - float(h) / 2, float(x) + float(w) / 2, float(y) + float(h) / 2)
+             for _, x, y, w, h in pads]
+    for i, a in enumerate(boxes):
+        for b in boxes[i + 1:]:
+            assert max(b[0] - a[2], a[0] - b[2], b[1] - a[3], a[1] - b[3]) >= min_gap - 1e-9
+    (pin1,) = [b for p, b in zip(pads, boxes) if p[0] == "1"]
+    assert pin1[0] < 0 and pin1[1] < 0  # pin 1 top left, as both datasheets' top views
