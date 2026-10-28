@@ -28,7 +28,7 @@ AI agent reviews it. Each item comes from a bug this project actually found; the
 - [ ] A new test is mutation-checked: break the logic it guards and confirm it fails.
 - [ ] SITL code feeds the firmware only what the vehicle or ground station can measure; no truth leaks.
 - [ ] `make core-test core-lint core-tidy sim-test swarm` pass. Firmware changes also build with `make flight`,
-      `make flight-fcstep FLIGHT_TARGET=esp32s3` and `make radio`.
+      `make flight-fcstep FLIGHT_TARGET=esp32s3`, `make flight-c5link` and `make radio`.
 
 ## Subtree hygiene
 - [ ] Subtree edits are minimal, marked `ESP-FC Next:` and listed in `docs/fc_core.md`. Default builds are

@@ -8,6 +8,9 @@
 #include "wifi_esp32.h"
 #include "wifilink.h"
 #endif
+#ifdef CONFIG_TRANSPORT_C5_SPI
+#include "c5_link.h" /* ESP-FC Next: CRTP over the P4 <-> C5 SPI link */
+#endif
 
 static bool isInit;
 
@@ -53,6 +56,8 @@ void transportInit(void)
 #if defined(CONFIG_TRANSPORT_NATIVE_WIFI) || defined(CONFIG_TRANSPORT_REMOTE_WIFI)
     wifiInit();
     wifilinkInit();
+#elif defined(CONFIG_TRANSPORT_C5_SPI)
+    c5LinkInit();
 #endif
     isInit = true;
 }
@@ -65,6 +70,8 @@ bool transportTest(void)
 
 #if defined(CONFIG_TRANSPORT_NATIVE_WIFI) || defined(CONFIG_TRANSPORT_REMOTE_WIFI)
     return wifiTest() && wifilinkTest();
+#elif defined(CONFIG_TRANSPORT_C5_SPI)
+    return c5LinkTest();
 #else
     return true;
 #endif
@@ -74,6 +81,8 @@ struct crtpLinkOperations *transportGetLink(void)
 {
 #if defined(CONFIG_TRANSPORT_NATIVE_WIFI) || defined(CONFIG_TRANSPORT_REMOTE_WIFI)
     return wifilinkGetLink();
+#elif defined(CONFIG_TRANSPORT_C5_SPI)
+    return c5LinkGetLink();
 #else
     return &noneLink;
 #endif
@@ -85,6 +94,8 @@ const char *transportGetName(void)
     return "native-wifi";
 #elif defined(CONFIG_TRANSPORT_REMOTE_WIFI)
     return "remote-wifi";
+#elif defined(CONFIG_TRANSPORT_C5_SPI)
+    return "c5-spi";
 #else
     return "none";
 #endif

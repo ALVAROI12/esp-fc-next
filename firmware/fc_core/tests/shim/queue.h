@@ -1,4 +1,4 @@
-/* Host stand-in for FreeRTOS queue.h, only for testing target glue (test_runtime.c implements it). */
+/* Host stand-in for FreeRTOS queue.h, only for testing target glue (shim/queue.c implements it). */
 #pragma once
 
 #include <stddef.h>

@@ -41,6 +41,12 @@ menu "ESPDrone Config"
                 the default for targets such as ESP32-P4 without a radio
                 companion chip.
 
+        config TRANSPORT_C5_SPI
+            bool "ESP32-C5 radio companion over SPI (ESP-FC Next)"
+            help
+                ESP-FC Next: CRTP over the 64-byte P4 <-> C5 SPI frame (docs/protocols.md); the C5 runs
+                firmware/radio. The P4 polls as SPI master at 500 Hz.
+
         config TRANSPORT_REMOTE_WIFI
             bool "remote Wi-Fi (integration skeleton)"
             depends on IDF_TARGET_ESP32P4 && ESP_WIFI_REMOTE_ENABLED
@@ -49,6 +55,23 @@ menu "ESPDrone Config"
                 transport and companion firmware are still required and are
                 board-specific; this option is not part of hardware sign-off.
     endchoice
+
+    if TRANSPORT_C5_SPI
+        config ESPFC_C5_SPI_MOSI
+            int "C5 link SPI MOSI GPIO"
+            default 2
+        config ESPFC_C5_SPI_MISO
+            int "C5 link SPI MISO GPIO"
+            default 3
+        config ESPFC_C5_SPI_SCLK
+            int "C5 link SPI SCLK GPIO"
+            default 4
+        config ESPFC_C5_SPI_CS
+            int "C5 link SPI CS GPIO"
+            default 5
+            help
+                Placeholder pins until the P4+C5 board exists; set them from the schematic.
+    endif
 
     choice
         prompt "extend board version"

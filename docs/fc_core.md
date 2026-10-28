@@ -287,6 +287,7 @@ proposed upstream.
 | `modules/src/position_controller_pid.c` | Trajectory derivatives discarded, causing tracking lag | Optional velocity/acceleration feedforward with stock defaults of zero |
 | `modules/src/controller_pid.c` / interface | Reinitialization kept stale integral and held commands | Explicit dynamics-only reset used by `fc_step` |
 | `modules/src/stabilizer.c`, `modules/src/estimator.c`, `hal/src/sensors_mpu6050_hm5883L_ms5611.c`, `CMakeLists.txt`, `main/Kconfig.projbuild` | No way to run `fc_step` on target | `CONFIG_ESPFC_FC_STEP` (default off): stabilizer calls `fcRuntimeStep`; position/pose/ToF/flow enqueues go to `fc_runtime` |
+| `hal/src/transport.c`, `CMakeLists.txt`, `main/Kconfig.projbuild` | No CRTP transport for the P4 + C5 radio companion | `CONFIG_TRANSPORT_C5_SPI` (default off): `transport.c` selects `fc_core/target/c5_link.c`; `esp_driver_spi` is always a component requirement (requirements resolve before Kconfig) |
 
 ## Findings logged for gate G3
 

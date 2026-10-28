@@ -1,5 +1,5 @@
 set(crazyflie_transport_sources)
-set(crazyflie_transport_requires)
+set(crazyflie_transport_requires esp_driver_spi) # ESP-FC Next: C5 SPI link (requirements precede Kconfig)
 
 idf_build_get_property(crazyflie_idf_target IDF_TARGET)
 
@@ -18,6 +18,13 @@ if(CONFIG_TRANSPORT_NATIVE_WIFI)
   list(APPEND crazyflie_transport_sources "./hal/src/wifilink.c")
 elseif(CONFIG_TRANSPORT_REMOTE_WIFI)
   list(APPEND crazyflie_transport_sources "./hal/src/wifilink.c")
+endif()
+
+# ESP-FC Next: CRTP over the P4 <-> C5 SPI link, compiled in place from firmware/fc_core.
+if(CONFIG_TRANSPORT_C5_SPI)
+  set(fc_link_dir "${CMAKE_CURRENT_LIST_DIR}/../../../../fc_core")
+  list(APPEND crazyflie_transport_sources "${fc_link_dir}/target/c5_link.c" "${fc_link_dir}/src/fc_link.c")
+  list(APPEND crazyflie_transport_includes "${fc_link_dir}/include" "${fc_link_dir}/target")
 endif()
 
 if(CONFIG_ESPNOW_CONTROL)
@@ -105,7 +112,7 @@ idf_component_register(SRCS "./hal/src/buzzer.c"
                 "./utils/src/statsCnt.c"
                 "./utils/src/version.c"
                 "./utils/src/rateSupervisor.c"
-                INCLUDE_DIRS "./hal/interface" "./modules/interface" "./utils/interface" ${crazyflie_fc_includes}
+                INCLUDE_DIRS "./hal/interface" "./modules/interface" "./utils/interface" ${crazyflie_fc_includes} ${crazyflie_transport_includes}
                 REQUIRES i2c_bus deck mpu6050 ms5611 hmc5883l pmw3901 vl53l1 vl53l0 platform config led eeprom dsp_lib motors adc esp_timer esp_driver_gpio ${crazyflie_transport_requires})
 
 idf_component_get_property( FREERTOS_ORIG_INCLUDE_PATH freertos ORIG_INCLUDE_PATH)

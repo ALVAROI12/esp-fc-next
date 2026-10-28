@@ -17,7 +17,7 @@ COVERAGE_UNREACHABLE := --exclude '.*/controller_indi\.c' --exclude '.*/position
 COVERAGE_FILTERS := --include-internal-functions --filter 'firmware/flight/components/core/' \
 	--filter 'firmware/fc_core/src/' --filter 'firmware/fc_core/host/' $(COVERAGE_UNREACHABLE)
 
-.PHONY: all flight flight-fcstep radio core-test core-coverage sim-setup sim-test g1 vibration failsafe flow-braking swarm link-fuzz core-lint core-tidy mbedtls-src viewer pdf clean
+.PHONY: all flight flight-fcstep flight-c5link radio core-test core-coverage sim-setup sim-test g1 vibration failsafe flow-braking swarm link-fuzz core-lint core-tidy mbedtls-src viewer pdf clean
 
 all: flight radio core-test
 
@@ -90,6 +90,11 @@ flight:
 flight-fcstep:
 	$(IDF) firmware/flight -B build-$(FLIGHT_TARGET)-fcstep -D SDKCONFIG=build-$(FLIGHT_TARGET)-fcstep/sdkconfig \
 		-D IDF_TARGET=$(FLIGHT_TARGET) -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;../fc_core/target/sdkconfig.fc_step" build
+
+# P4 image with CRTP over the C5 SPI link (CONFIG_TRANSPORT_C5_SPI); compile check, not run on a board.
+flight-c5link:
+	$(IDF) firmware/flight -B build-esp32p4-c5link -D SDKCONFIG=build-esp32p4-c5link/sdkconfig \
+		-D IDF_TARGET=esp32p4 -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;../fc_core/target/sdkconfig.c5_link" build
 
 radio:
 	$(call idf_build,firmware/radio,$(RADIO_TARGET))

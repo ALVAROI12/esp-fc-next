@@ -38,11 +38,16 @@ fc_core_test(test_failsafe)
 fc_core_test(test_link)
 fc_core_test(test_vars)
 # Target-only glue against a host queue shim and fake commander/system (test_runtime.c implements them).
-add_executable(test_runtime test_runtime.c ../target/fc_runtime.c)
+add_executable(test_runtime test_runtime.c shim/queue.c ../target/fc_runtime.c)
 target_include_directories(test_runtime PRIVATE shim ../target)
 target_link_libraries(test_runtime PRIVATE fc_core unity)
 target_compile_options(test_runtime PRIVATE -Wall -Wextra -Werror)
 add_test(NAME test_runtime COMMAND test_runtime)
+add_executable(test_c5_link test_c5_link.c shim/queue.c ../target/c5_link.c)
+target_include_directories(test_c5_link PRIVATE shim ../target)
+target_link_libraries(test_c5_link PRIVATE fc_core unity)
+target_compile_options(test_c5_link PRIVATE -Wall -Wextra -Werror)
+add_test(NAME test_c5_link COMMAND test_c5_link)
 fc_core_test_4k(test_failsafe)
 
 # AES-CCM radio envelope against ESP-IDF's bundled mbedtls (same version the C5 firmware links).

@@ -86,6 +86,10 @@ jobs:
             target: esp32s3
             variant: -fcstep
             defaults: sdkconfig.defaults;../fc_core/target/sdkconfig.fc_step
+          - project: flight # CRTP over the C5 SPI link (CONFIG_TRANSPORT_C5_SPI); compile check
+            target: esp32p4
+            variant: -c5link
+            defaults: sdkconfig.defaults;../fc_core/target/sdkconfig.c5_link
           - project: radio
             target: esp32c5
     runs-on: ubuntu-latest

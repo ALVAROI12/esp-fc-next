@@ -13,32 +13,7 @@
 #include "task.h"
 #include "unity.h"
 
-/* ---- fakes for the FreeRTOS queue, commander and system modules ---- */
-QueueHandle_t xQueueCreateStatic(UBaseType_t len, UBaseType_t size, uint8_t *buf, StaticQueue_t *q)
-{
-    *q = (StaticQueue_t){.buf = buf, .len = len, .size = size};
-    return q;
-}
-
-BaseType_t xQueueSend(QueueHandle_t q, const void *item, TickType_t wait)
-{
-    (void)wait;
-    if (q->count == q->len) return pdFALSE;
-    memcpy(q->buf + ((q->head + q->count) % q->len) * q->size, item, q->size);
-    q->count++;
-    return pdTRUE;
-}
-
-BaseType_t xQueueReceive(QueueHandle_t q, void *item, TickType_t wait)
-{
-    (void)wait;
-    if (!q->count) return pdFALSE;
-    memcpy(item, q->buf + q->head * q->size, q->size);
-    q->head = (q->head + 1) % q->len;
-    q->count--;
-    return pdTRUE;
-}
-
+/* ---- fakes for the commander and system modules (queue fake: shim/queue.c) ---- */
 static TickType_t rtosTick;
 TickType_t xTaskGetTickCount(void) { return rtosTick; }
 

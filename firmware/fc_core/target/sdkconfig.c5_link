@@ -1,0 +1,3 @@
+# ESP-FC Next: P4 image with CRTP over the C5 SPI link (make flight-c5link). Compile check; not run on a board.
+# CONFIG_TRANSPORT_NONE is not set
+CONFIG_TRANSPORT_C5_SPI=y

@@ -70,7 +70,9 @@ broadcast, so the swarm status and swarm commands use an application-level envel
 
 ## 4. Not covered yet
 
-- P4 SPI master driver and its CRTP hand-off to the flight firmware; link-loss timing on hardware.
+- Link-loss timing on hardware. Both SPI ends build but have not run on a board.
+- ESP-Drone's `crtpRxTask` asserts (motor stop) if a CRTP port queue overflows. That is upstream behaviour for
+  every link; a ground station flooding one port can trigger it.
 - A provisioning tool (the NVS layout is defined in section 5; `nvs_partition_gen.py` can write it).
 - Crazyswarm2 bridge (CRTP over UDP/ESP-NOW to the ground station).
 - Group key: every member can seal any message. CRTP is accepted only from sender id 0 (ground), so a buggy
@@ -92,6 +94,11 @@ Code: `include/fc_radio.h`, `src/fc_radio.c` (portable, host-tested in `tests/te
 - Transport: the P4 is SPI master and polls; each transaction carries one frame each way, IDLE when there is
   nothing to deliver. ESP-NOW receives go through a 16-deep queue (drop when full); all envelope work runs in
   one task. SPI pins and the Wi-Fi channel are Kconfig placeholders until the board exists.
+- P4 end: `firmware/fc_core/target/c5_link.c` is ESP-Drone's CRTP transport for `CONFIG_TRANSPORT_C5_SPI`
+  (`make flight-c5link`). A 500 Hz SPI-master task calls `c5LinkExchange` per transaction. That step delivers
+  CRTP frames to the CRTP stack (16-deep queue, drop when full) and ignores SWARM_STATUS for now. It counts bad
+  frames (no C5, CRC) and `seq` gaps, and sends one queued CRTP packet or IDLE. `isConnected` means a CRTP
+  packet arrived within 1 s; C5 IDLE frames alone do not count. Host tests: `tests/test_c5_link.c`.
 - Provisioning: NVS namespace `fclink`: `key` (16-byte blob), `net` (u32), `id` (u8), `ctr` (u32, written by
   the firmware). There is no default key. Without one the radio stays off; the P4 then sees no valid frames and its
   command watchdog lands.
