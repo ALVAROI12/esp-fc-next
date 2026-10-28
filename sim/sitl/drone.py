@@ -166,12 +166,12 @@ class SitlDrone:
 
     def goto(self, x: float, y: float, z: float, yaw_deg: float = 0.0, duration: float = 0.0) -> None:
         """Fly to a point along a minimum-jerk path (duration 0 = step setpoint)."""
-        start = np.array(self.target[:3]) if self.target else self.quad.state.pos.copy()
+        start = np.array(self.target[:3]) if self.target else np.array(self.fw.state()[:3])  # estimate, not truth
         self.follow(min_jerk(self.time, duration, start, np.array([x, y, z], dtype=float), yaw_deg))
 
     def takeoff(self, height: float, duration: float = 2.0) -> None:
-        p = self.quad.state.pos
-        self.goto(p[0], p[1], height, 0.0, duration)
+        x, y = self.fw.state()[:2]  # what the ground station sees (telemetry), not truth
+        self.goto(x, y, height, 0.0, duration)
 
     def calibrate_and_arm(self, timeout: float = 3.0) -> None:
         """Sit still until the firmware finishes gyro/accel calibration, then arm."""
@@ -212,7 +212,7 @@ class SitlDrone:
             self.fw.push_battery(self.battery_cell_v)
         if self.tof and self.tick % self.every["tof"] == 0:
             d = self.tof.sample(s.pos[2], rot)
-            if self.height_up and d is not None and (self.safe_landing or s.pos[2] > 0.03):
+            if self.height_up and d is not None and (self.safe_landing or d > 0.03):
                 self.fw.push_tof(d + self.tof_bias_m, TOF_STD_REPORTED)
 
     def step(self, record: bool = True) -> None:
