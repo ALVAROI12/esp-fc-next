@@ -193,8 +193,8 @@ hardware blackbox measurements before flight.
 - **Link-loss safety:** see the opt-in design and evidence below; validate range/ground offsets,
   stale-sensor detection and physical touchdown before enabling on hardware.
 - **Radio link on hardware:** both SPI ends, the ground serial link and provisioning are host-tested and
-  compile-checked (docs/protocols.md); set real pins, then measure link-loss timing on boards. A cflib /
-  Crazyswarm2 driver on `tools/espfc_link.py` is still to write. (The four-drone swarm SITL is done: `make swarm`.)
+  compile-checked (docs/protocols.md); set real pins, then measure link-loss timing on boards. The cflib
+  driver is `tools/espfc_cflib.py`; Crazyswarm2 needs a two-line `register()` patch, not yet tried. (The four-drone swarm SITL is done: `make swarm`.)
 - **FLOW-01:** flow/ToF alone does not meet absolute XY positioning accuracy. See `sim/README.md`.
 
 ## Opt-in latched hold-and-land

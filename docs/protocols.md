@@ -74,7 +74,7 @@ broadcast, so the swarm status and swarm commands use an application-level envel
 - Link-loss timing on hardware. Both SPI ends build but have not run on a board.
 - ESP-Drone's `crtpRxTask` asserts (motor stop) if a CRTP port queue overflows. That is upstream behaviour for
   every link; a ground station flooding one port can trigger it.
-- Crazyswarm2 / cflib driver on top of `tools/espfc_link.py` (the frame link to the ground C5 exists).
+- Crazyswarm2 runs on the cflib driver only after a two-line patch to its cflib backend (below); not tried yet.
 - Group key: every member can seal any message. CRTP is accepted only from sender id 0 (ground), so a buggy
   drone cannot command another, but a compromised drone can impersonate the ground. Per-sender keys fix that.
 
@@ -101,6 +101,13 @@ Code: `include/fc_radio.h`, `src/fc_radio.c` (portable, host-tested in `tests/te
   `fc_link_stream_push` (C) and `tools/espfc_link.py` (PC: `GroundLink.send_crtp(dest, packet)`, `receive()`)
   resynchronize one byte at a time, so console text on the port is skipped. Tests: `test_link.c` and
   `sim/tests/test_ground_link.py`, which cross-checks the Python codec against the firmware one.
+- cflib / Crazyswarm2: `tools/espfc_cflib.py` is a cflib link driver for URIs `espfc://<id>@<serial device>`
+  (id 1-254, or `all` for broadcast commands). All URIs on one device share the serial port. A reader thread
+  routes telemetry by sender id; an unplugged ground radio reports a link error on every link. `needs_resending`
+  is on because ESP-NOW broadcast is unacknowledged. To use it, call `espfc_cflib.register()` after
+  `cflib.crtp.init_drivers()`: in scripts directly, in Crazyswarm2's cflib backend server as that two-line patch.
+  Then set `uri: espfc://<id>@<device>` per drone in `crazyflies.yaml`. Tests: `sim/tests/test_espfc_cflib.py`
+  drives it through cflib's `get_link_driver` over a pyserial `loop://` port.
 - Transport: the P4 is SPI master and polls; each transaction carries one frame each way, IDLE when there is
   nothing to deliver. ESP-NOW receives go through a 16-deep queue (drop when full); all envelope work runs in
   one task. SPI pins and the Wi-Fi channel are Kconfig placeholders until the board exists.
