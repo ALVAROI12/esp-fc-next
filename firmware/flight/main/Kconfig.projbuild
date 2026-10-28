@@ -70,7 +70,7 @@ menu "ESPDrone Config"
             int "C5 link SPI CS GPIO"
             default 5
             help
-                Placeholder pins until the P4+C5 board exists; set them from the schematic.
+                Flight controller pins, hardware/boards.py (P4 dict).
     endif
 
     choice

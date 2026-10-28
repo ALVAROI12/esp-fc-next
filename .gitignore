@@ -23,3 +23,9 @@ sim/reports/viewer/
 
 # Radio link group key (tools/provision_radio.py)
 secrets/
+
+# SKiDL output (python hardware/boards.py)
+hardware/out/
+hardware/*.log
+hardware/*.erc
+hardware/*_sklib.py

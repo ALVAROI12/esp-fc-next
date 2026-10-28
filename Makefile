@@ -17,7 +17,7 @@ COVERAGE_UNREACHABLE := --exclude '.*/controller_indi\.c' --exclude '.*/position
 COVERAGE_FILTERS := --include-internal-functions --filter 'firmware/flight/components/core/' \
 	--filter 'firmware/fc_core/src/' --filter 'firmware/fc_core/host/' $(COVERAGE_UNREACHABLE)
 
-.PHONY: all flight flight-fcstep flight-c5link radio core-test core-coverage sim-setup sim-test g1 vibration failsafe flow-braking swarm link-fuzz core-lint core-tidy mbedtls-src viewer pdf clean
+.PHONY: hw-setup hw all flight flight-fcstep flight-c5link radio core-test core-coverage sim-setup sim-test g1 vibration failsafe flow-braking swarm link-fuzz core-lint core-tidy mbedtls-src viewer pdf clean
 
 all: flight radio core-test
 
@@ -106,6 +106,15 @@ sim-setup:
 
 sim-test:
 	sim/.venv/bin/python -m pytest sim
+
+# Phase 3 boards as code (needs KiCad for its symbol library, ngspice for the power check): netlists in
+# hardware/out/, then the netlist and power-path checks (gate G4).
+hw-setup:
+	uv venv --python 3.12 hardware/.venv
+	uv pip install --python hardware/.venv/bin/python -r hardware/requirements.txt
+
+hw:
+	cd hardware && .venv/bin/python boards.py && .venv/bin/python -m pytest -q -p no:cacheprovider test_boards.py
 
 # Gate G1 math-model report -> sim/reports/g1/README.md (non-zero exit if the gate fails).
 g1:

@@ -2,18 +2,18 @@ menu "ESP-FC Next radio"
 
 config ESPFC_RADIO_SPI_MOSI
     int "SPI slave MOSI GPIO (from P4)"
-    default 2
+    default 8
 config ESPFC_RADIO_SPI_MISO
     int "SPI slave MISO GPIO (to P4)"
-    default 3
+    default 9
 config ESPFC_RADIO_SPI_SCLK
     int "SPI slave SCLK GPIO"
-    default 4
+    default 6
 config ESPFC_RADIO_SPI_CS
     int "SPI slave CS GPIO"
-    default 5
+    default 10
     help
-        Placeholder pins until the P4+C5 board exists; set them from the schematic.
+        Radio board pins, hardware/boards.py (C5 dict); avoids the C5 strapping pins.
 
 config ESPFC_RADIO_CHANNEL
     int "Wi-Fi channel for ESP-NOW (all swarm members and the ground bridge)"
