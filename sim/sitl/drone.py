@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from collections import deque
 import math
+from types import SimpleNamespace
 from typing import Callable
 
 import numpy as np
@@ -81,6 +82,21 @@ class Log:
 
     def arrays(self) -> dict[str, np.ndarray]:
         return {k: np.asarray(v) for k, v in self.__dict__.items()}
+
+
+class _PlannerRadio:
+    """Stands in for cflib's Crazyflie under HighLevelCommander: port-8 packets reach the on-board planner
+    while the command link is up. Protocol 4 is what ESP-Drone reports (config.h PROTOCOL_VERSION)."""
+
+    def __init__(self, drone: "SitlDrone") -> None:
+        self.drone = drone
+        self.platform = SimpleNamespace(get_protocol_version=lambda: 4)
+
+    def send_packet(self, pk) -> None:
+        if pk.port != 8:  # CRTPPort.SETPOINT_HL
+            raise ValueError(f"only the high-level commander port is simulated, got port {pk.port}")
+        if self.drone.link_up and self.drone.fw.hl_packet(bytes(pk.data)) != 0:
+            raise RuntimeError(f"firmware rejected high-level command {bytes(pk.data)[:1].hex()}")
 
 
 class SitlDrone:
@@ -173,6 +189,12 @@ class SitlDrone:
     def takeoff(self, height: float, duration: float = 2.0) -> None:
         x, y = self.fw.state()[:2]  # what the ground station sees (telemetry), not truth
         self.goto(x, y, height, 0.0, duration)
+
+    def high_level_commander(self):
+        """cflib's HighLevelCommander bound to this drone's on-board planner, as Crazyswarm2 drives it."""
+        from cflib.crazyflie.high_level_commander import HighLevelCommander
+        self.high_level = True
+        return HighLevelCommander(_PlannerRadio(self))
 
     def calibrate_and_arm(self, timeout: float = 3.0) -> None:
         """Sit still until the firmware finishes gyro/accel calibration, then arm."""

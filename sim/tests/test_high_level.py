@@ -5,7 +5,6 @@ crtp_commander_high_level.c and forwarded to fc_step as target/fc_runtime.c does
 """
 
 import math
-from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -15,29 +14,12 @@ from sitl.firmware import FAILSAFE_LANDED
 
 pytest.importorskip("cflib")
 from cflib.crazyflie.high_level_commander import HighLevelCommander  # noqa: E402
-from cflib.crtp.crtpstack import CRTPPort  # noqa: E402
-
-PROTOCOL_VERSION = 4  # firmware/flight/components/config/include/config.h
-
-
-class Radio:
-    """Stands in for cflib's Crazyflie: HighLevelCommander only needs send_packet and the protocol version."""
-
-    def __init__(self, drone: SitlDrone) -> None:
-        self.drone = drone
-        self.platform = SimpleNamespace(get_protocol_version=lambda: PROTOCOL_VERSION)
-
-    def send_packet(self, pk) -> None:
-        assert pk.port == CRTPPort.SETPOINT_HL
-        if self.drone.link_up:
-            assert self.drone.fw.hl_packet(bytes(pk.data)) == 0
 
 
 def airborne(**kw) -> tuple[SitlDrone, HighLevelCommander]:
     d = SitlDrone(seed=4, profile="whoop2_4k", **kw)
-    d.high_level = True
+    hl = d.high_level_commander()
     d.calibrate_and_arm()
-    hl = HighLevelCommander(Radio(d))
     hl.takeoff(1.0, 2.0)
     d.run(3.0, record_hz=None)
     return d, hl

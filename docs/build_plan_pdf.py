@@ -249,7 +249,7 @@ def build():
          "diagnostic profile (no board yet)."],
         ["1.8 Swarm simulation", "SITL checks pass",
          "make swarm: four firmware copies in lockstep, altitude layers 1.0-2.05 m, square formation and diagonal "
-         "swap. Nominal, link loss, camera dropout and low battery (in formation and mid-swap, top layer) all land "
+         "swap, commanded with cflib HighLevelCommander packets into each drone's upstream planner (Crazyswarm2's path). Nominal, link loss, camera dropout and low battery (in formation and mid-swap, top layer) all land "
          "safely; minimum separation 0.35 m. No inter-drone downwash; low battery is a voltage step, no discharge model."],
         ["1.9 G3 quality gate", "Met on host",
          "cppcheck and clang-tidy clean (make core-lint / core-tidy, CI); -Wall -Wextra on fc_core sources; "

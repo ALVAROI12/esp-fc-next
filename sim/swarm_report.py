@@ -3,7 +3,8 @@
     make swarm
     python sim/swarm_report.py --out /path/to/report
 
-Mission: takeoff to a per-drone altitude layer, square formation, diagonal position swap, landing.
+Mission: takeoff to a per-drone altitude layer, square formation, diagonal position swap, landing. Commands are
+cflib HighLevelCommander packets flown by each drone's on-board planner, as Crazyswarm2 sends them.
 Horizontal moves happen only inside a drone's own layer (vertical deconfliction). Faults are injected
 one scenario at a time. Drones do not interact physically: rotor downwash, wake and contact between
 vehicles are NOT modeled, so separation here is geometric clearance, not aerodynamic safety.
@@ -42,6 +43,7 @@ class Swarm:
         self.time = 0.0
         self.pos: list[np.ndarray] = []  # truth, one (4, 3) row per chunk
         self.land_done_at: list[float | None] = [None] * len(self.drones)  # landing trajectory end time
+        self.hl = [d.high_level_commander() for d in self.drones]
 
     def advance(self, seconds: float) -> None:
         for _ in range(int(round(seconds / CHUNK))):
@@ -66,20 +68,23 @@ class Swarm:
             d.calibrate_and_arm()
         self.time = max(d.time for d in self.drones)
         self.advance(CHUNK)
-        for i, d in enumerate(self.drones):
-            d.takeoff(LAYERS[i], 3.0)
+        for i, hl in enumerate(self.hl):
+            hl.takeoff(LAYERS[i], 3.0)
         self.advance(4.0)
 
+    def send_moves(self, targets: list[tuple[float, float]]) -> None:
+        for i, hl in enumerate(self.hl):
+            hl.go_to(*targets[i], LAYERS[i], 0.0, MOVE_S)
+
     def move_all(self, targets: list[tuple[float, float]]) -> None:
-        for i, d in enumerate(self.drones):
-            d.goto(*targets[i], LAYERS[i], 0.0, MOVE_S)
+        self.send_moves(targets)
         self.advance(MOVE_S + 1.5)
 
     def land_all(self) -> None:
         for i, d in enumerate(self.drones):
             if d.link_up and d.fw.armed:
-                x, y, z, _ = d.target
-                d.goto(x, y, 0.0, 0.0, z / 0.3)  # ~0.3 m/s average descent, zero speed at the ground
+                z = LAYERS[i]
+                self.hl[i].land(0.0, z / 0.3)  # ~0.3 m/s average descent, zero speed at the ground
                 self.land_done_at[i] = self.time + z / 0.3
         self.advance(max(LAYERS) / 0.3 + 3.0)
 
@@ -117,8 +122,7 @@ def fly_mission(fault: str | None = None, fault_drone: int = 0, fault_phase: str
 
     swap_targets = [STARTS[j] for j in SWAP]
     if fault and fault_phase == "swap":
-        for i, d in enumerate(s.drones):
-            d.goto(*swap_targets[i], LAYERS[i], 0.0, MOVE_S)
+        s.send_moves(swap_targets)
         s.advance(MOVE_S / 2)  # mid-transit
         inject()
         s.advance(MOVE_S / 2 + 1.5)
@@ -187,7 +191,8 @@ def main() -> None:
              "below it at that moment. The ground station does not yet replan around a landing drone.",
              "- Low battery is a voltage step only (no discharge curve, sag or reduced thrust); radio is ideal "
              "apart from the injected link loss; "
-             "ESP-NOW timing and the P4<->C5 link are not in the loop. Not Crazyswarm2.",
+             "ESP-NOW timing and the P4<->C5 link are not in the loop. Commands are cflib HighLevelCommander packets "
+             "into each drone's upstream planner, not a running Crazyswarm2/ROS 2 stack.",
              "- All-height loss still FAULTs (motor stop) and is excluded from safe-landing claims.", ""]
     (args.out / "README.md").write_text("\n".join(lines))
     print(f"Report: {args.out / 'README.md'} ({'PASS' if passed else 'FAIL'})")
