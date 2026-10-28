@@ -239,7 +239,8 @@ def build():
         ["fc_step on target", "Builds; never flown",
          "CONFIG_ESPFC_FC_STEP runs fc_step in ESP-Drone's stabilizer task (make flight-fcstep, CI on ESP32-S3: +7 KB). "
          "Mocap/pose/ToF/flow reach it through a static queue; only new commander packets feed its watchdog; host "
-         "tests cover the glue. P4 image is still the diagnostic profile (no board yet). Known gap: double IMU filtering."],
+         "tests cover the glue; the driver LPF is compiled out so IMU samples are filtered once. P4 image is still the "
+         "diagnostic profile (no board yet)."],
         ["1.8 Swarm simulation", "SITL checks pass",
          "make swarm: four firmware copies in lockstep, altitude layers 1.0-2.05 m, square formation and diagonal "
          "swap. Nominal, link loss and camera dropout (in formation and mid-swap, top layer) all land safely; "

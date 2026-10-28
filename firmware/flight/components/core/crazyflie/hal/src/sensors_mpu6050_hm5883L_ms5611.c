@@ -383,7 +383,9 @@ void processAccGyroMeasurements(const uint8_t *buffer)
     sensorData.gyro.y = (gyroRaw.y - gyroBias.y) * SENSORS_DEG_PER_LSB_CFG;
     sensorData.gyro.z = (gyroRaw.z - gyroBias.z) * SENSORS_DEG_PER_LSB_CFG;
     /* sensors step 2.5 low pass filter */
+#ifndef CONFIG_ESPFC_FC_STEP /* ESP-FC Next: fc_step applies the same LPF itself */
     applyAxis3fLpf((lpf2pData *)(&gyroLpf), &sensorData.gyro);
+#endif
 
 #ifdef CONFIG_TARGET_ESPLANE_V1
     accScaled.x = (accelRaw.x) * SENSORS_G_PER_LSB_CFG / accScale;
@@ -396,7 +398,9 @@ void processAccGyroMeasurements(const uint8_t *buffer)
 
     /* sensors step 2.6 Compensate for a miss-aligned accelerometer. */
     sensorsAccAlignToGravity(&accScaled, &sensorData.acc);
+#ifndef CONFIG_ESPFC_FC_STEP /* ESP-FC Next: fc_step applies the same LPF itself */
     applyAxis3fLpf((lpf2pData *)(&accLpf), &sensorData.acc);
+#endif
 }
 static bool sensorsDeviceInit(void)
 {

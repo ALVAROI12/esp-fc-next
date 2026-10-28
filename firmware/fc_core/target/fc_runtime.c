@@ -61,8 +61,8 @@ void fcRuntimeStep(const sensorData_t *sensors, setpoint_t *setpoint, state_t *s
     bool armed = systemIsArmed();
     if (armed != fc_is_armed()) fc_arm(armed); /* fc_arm refuses (and keeps refusing) unsafe arms */
 
-    /* ponytail: sensorsAcquire output is already bias-corrected and low-passed by the ESP-Drone driver, so
-     * fc_step filters it a second time (extra phase lag). Feed the raw driver samples before HIL timing work. */
+    /* Driver samples are bias-corrected, scaled and gravity-aligned; its LPF is compiled out in this mode
+     * (sensors_mpu6050_hm5883L_ms5611.c) because fc_step applies the same 80/30 Hz filters. */
     const float gyro[3] = {sensors->gyro.x, sensors->gyro.y, sensors->gyro.z};
     const float acc[3] = {sensors->acc.x, sensors->acc.y, sensors->acc.z};
     fc_step(gyro, acc);

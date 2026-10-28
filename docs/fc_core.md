@@ -20,8 +20,10 @@ the linker drops fc_step there; the real link check is the ESP32-S3 drone target
 - `systemIsArmed()` drives `fc_arm()` (which can refuse); the stabilizer emergency stop latches
   `fc_emergency_stop()` until reboot. fc_step drives the motors; `state` is copied back for logs.
 
-Known gap: `sensorsAcquire` returns ESP-Drone's bias-corrected, low-passed samples, so fc_step filters
-them twice. Feed raw driver samples before any timing or HIL work. The 4 kHz configuration remains
+- The ESP-Drone sensor driver keeps bias, scale and gravity alignment but skips its 80/30 Hz LPF in this
+  mode; fc_step applies the same filters, so samples are filtered once.
+
+The 4 kHz configuration remains
 host/SITL only. A passing P4 build does not validate driver sampling, scheduling deadlines, or
 hardware safety.
 
@@ -267,7 +269,7 @@ proposed upstream.
 | `modules/interface/stabilizer_types.h` | Fixed loop rates prevented explicit host variants | Overridable main/attitude macros; target defaults unchanged |
 | `modules/src/position_controller_pid.c` | Trajectory derivatives discarded, causing tracking lag | Optional velocity/acceleration feedforward with stock defaults of zero |
 | `modules/src/controller_pid.c` / interface | Reinitialization kept stale integral and held commands | Explicit dynamics-only reset used by `fc_step` |
-| `modules/src/stabilizer.c`, `modules/src/estimator.c`, `CMakeLists.txt`, `main/Kconfig.projbuild` | No way to run `fc_step` on target | `CONFIG_ESPFC_FC_STEP` (default off): stabilizer calls `fcRuntimeStep`; position/pose/ToF/flow enqueues go to `fc_runtime` |
+| `modules/src/stabilizer.c`, `modules/src/estimator.c`, `hal/src/sensors_mpu6050_hm5883L_ms5611.c`, `CMakeLists.txt`, `main/Kconfig.projbuild` | No way to run `fc_step` on target | `CONFIG_ESPFC_FC_STEP` (default off): stabilizer calls `fcRuntimeStep`; position/pose/ToF/flow enqueues go to `fc_runtime` |
 
 ## Findings logged for gate G3
 
