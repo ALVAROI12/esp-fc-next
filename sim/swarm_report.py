@@ -7,7 +7,7 @@ Mission: takeoff to a per-drone altitude layer, square formation, diagonal posit
 Horizontal moves happen only inside a drone's own layer (vertical deconfliction). Faults are injected
 one scenario at a time. Drones do not interact physically: rotor downwash, wake and contact between
 vehicles are NOT modeled, so separation here is geometric clearance, not aerodynamic safety.
-Battery is not modeled in the firmware, so a low-battery fault is not simulated.
+Low battery is injected as a step in reported cell voltage (no discharge curve or thrust sag).
 """
 
 from __future__ import annotations
@@ -37,6 +37,8 @@ class Swarm:
     def __init__(self, seed: int = 0):
         self.drones = [SitlDrone(start=(x, y, 0.0), seed=seed * 10 + i, profile=PROFILE,
                                  safe_landing=True, local_flow=True) for i, (x, y) in enumerate(STARTS)]
+        for d in self.drones:
+            d.battery_cell_v = 3.9
         self.time = 0.0
         self.pos: list[np.ndarray] = []  # truth, one (4, 3) row per chunk
         self.land_done_at: list[float | None] = [None] * len(self.drones)  # landing trajectory end time
@@ -98,7 +100,8 @@ def drone_outcome(d: SitlDrone, faulted: bool) -> dict:
 
 
 def fly_mission(fault: str | None = None, fault_drone: int = 0, fault_phase: str = "hover", seed: int = 0) -> dict:
-    """fault: None, "command" (link loss) or "tracking" (mocap dropout); fault_phase: "hover" or "swap"."""
+    """fault: None, "command" (link loss), "tracking" (mocap dropout) or "battery" (cell voltage drops below
+    the firmware threshold); fault_phase: "hover" or "swap"."""
     s = Swarm(seed)
     s.start()
     s.move_all(STARTS)  # formation square at layer altitudes
@@ -109,6 +112,8 @@ def fly_mission(fault: str | None = None, fault_drone: int = 0, fault_phase: str
             d.link_up = False
         elif fault == "tracking":
             d.tracking_up = False
+        elif fault == "battery":
+            d.battery_cell_v = 3.2
 
     swap_targets = [STARTS[j] for j in SWAP]
     if fault and fault_phase == "swap":
@@ -144,6 +149,8 @@ SCENARIOS = [
     ("mocap dropout in formation (drone 1)", {"fault": "tracking", "fault_drone": 1}),
     ("link loss mid-swap, top layer (drone 3)", {"fault": "command", "fault_drone": 3, "fault_phase": "swap"}),
     ("mocap dropout mid-swap, top layer (drone 3)", {"fault": "tracking", "fault_drone": 3, "fault_phase": "swap"}),
+    ("low battery in formation (drone 2)", {"fault": "battery", "fault_drone": 2}),
+    ("low battery mid-swap, top layer (drone 3)", {"fault": "battery", "fault_drone": 3, "fault_phase": "swap"}),
 ]
 
 
@@ -178,7 +185,8 @@ def main() -> None:
              "spacing of 0.35 m is a geometric plan, not a validated downwash clearance.",
              "- A faulted drone descends through lower layers; it is safe here only because the others are not "
              "below it at that moment. The ground station does not yet replan around a landing drone.",
-             "- Battery is not modeled (no low-battery fault); radio is ideal apart from the injected link loss; "
+             "- Low battery is a voltage step only (no discharge curve, sag or reduced thrust); radio is ideal "
+             "apart from the injected link loss; "
              "ESP-NOW timing and the P4<->C5 link are not in the loop. Not Crazyswarm2.",
              "- All-height loss still FAULTs (motor stop) and is excluded from safe-landing claims.", ""]
     (args.out / "README.md").write_text("\n".join(lines))

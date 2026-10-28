@@ -365,6 +365,40 @@ static void test_blind_descent_thrust_stays_below_hover_despite_accel_bias(void)
     TEST_ASSERT_GREATER_OR_EQUAL_UINT(hoverRatio * (FC_FAILSAFE_SINK_THRUST_MIN - 0.002f), minRatio);
 }
 
+static void fly_with_battery(unsigned ms, float cell_volts)
+{
+    for (unsigned i = 0; i < ms / 10; i++) {
+        TEST_ASSERT_TRUE(fc_push_battery(cell_volts));
+        drive(10, true, true, true, 1);
+    }
+}
+
+/* Task 1.8 low-battery fault: a sustained low cell voltage lands from a held pose even with fresh commands;
+ * a short sag (punch-out) does not, and a low pack cannot arm. */
+static void test_low_battery_lands_and_blocks_arming(void)
+{
+    TEST_ASSERT_FALSE(fc_push_battery(NAN));
+    TEST_ASSERT_FALSE(fc_push_battery(-1));
+    TEST_ASSERT_FALSE(fc_push_battery(6));
+    ground();
+    TEST_ASSERT_TRUE(fc_push_battery(FC_FAILSAFE_LOW_BATTERY_V - 0.1f));
+    TEST_ASSERT_FALSE(fc_arm(true));
+    TEST_ASSERT_TRUE(fc_push_battery(3.9f));
+    hover();
+    fly_with_battery(FC_FAILSAFE_LOW_BATTERY_MS / 2, FC_FAILSAFE_LOW_BATTERY_V - 0.1f);
+    fly_with_battery(100, 3.9f);
+    fly_with_battery(FC_FAILSAFE_LOW_BATTERY_MS - 100, FC_FAILSAFE_LOW_BATTERY_V - 0.1f);
+    TEST_ASSERT_EQUAL(FC_FAILSAFE_NORMAL, fc_failsafe_state());
+    fly_with_battery(200, FC_FAILSAFE_LOW_BATTERY_V - 0.1f);
+    TEST_ASSERT_EQUAL(FC_FAILSAFE_LAND, fc_failsafe_state());
+    TEST_ASSERT_BITS_HIGH(FC_FAILSAFE_REASON_LOW_BATTERY, (unsigned)safety_log("reason"));
+    TEST_ASSERT_EQUAL(modeAbs, fc_active_setpoint()->mode.x); /* camera still fresh: held XY */
+    TEST_ASSERT_EQUAL(modeVelocity, fc_active_setpoint()->mode.z);
+    fly_with_battery(500, 3.9f); /* recovered voltage and fresh commands cannot cancel LAND */
+    TEST_ASSERT_EQUAL(FC_FAILSAFE_LAND, fc_failsafe_state());
+    TEST_ASSERT_TRUE(motors_on());
+}
+
 static void test_camera_height_fallback_and_slow_descent(void)
 {
     hover();
@@ -734,6 +768,7 @@ int main(void)
     RUN_TEST(test_camera_height_fallback_and_slow_descent);
     RUN_TEST(test_touchdown_requires_actual_low_height_low_speed_and_dwell);
     RUN_TEST(test_touchdown_dwell_thrust_stays_below_hover);
+    RUN_TEST(test_low_battery_lands_and_blocks_arming);
     RUN_TEST(test_landing_timeout_is_fault);
     RUN_TEST(test_touchdown_dwell_restarts_after_height_rises);
     RUN_TEST(test_tof_expiry_during_dwell_uses_camera_height_and_restarts_dwell);

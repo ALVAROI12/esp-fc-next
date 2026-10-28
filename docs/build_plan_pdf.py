@@ -243,8 +243,8 @@ def build():
          "diagnostic profile (no board yet)."],
         ["1.8 Swarm simulation", "SITL checks pass",
          "make swarm: four firmware copies in lockstep, altitude layers 1.0-2.05 m, square formation and diagonal "
-         "swap. Nominal, link loss and camera dropout (in formation and mid-swap, top layer) all land safely; "
-         "minimum separation 0.35 m. No inter-drone downwash or battery model."],
+         "swap. Nominal, link loss, camera dropout and low battery (in formation and mid-swap, top layer) all land "
+         "safely; minimum separation 0.35 m. No inter-drone downwash; low battery is a voltage step, no discharge model."],
         ["1.9 G3 quality gate", "Met on host",
          "cppcheck and clang-tidy clean (make core-lint / core-tidy, CI); -Wall -Wextra on fc_core sources; "
          "line coverage 80.8% of fc_step-reachable code (INDI/Mellinger excluded, planner not built on host)."],

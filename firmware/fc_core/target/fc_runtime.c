@@ -10,6 +10,7 @@
 
 #include "commander.h"
 #include "fc_step.h"
+#include "pm_esplane.h"
 #include "system.h"
 
 enum { MEAS_POSITION, MEAS_TOF, MEAS_FLOW };
@@ -23,6 +24,7 @@ static StaticQueue_t queueStorage;
 static uint8_t queueBuffer[FC_RUNTIME_QUEUE_LEN * sizeof(meas_t)];
 static QueueHandle_t queue;
 static uint32_t lastSetpointTimestamp;
+static uint32_t batteryTick;
 
 void fcRuntimeInit(void)
 {
@@ -55,6 +57,13 @@ void fcRuntimeStep(const sensorData_t *sensors, setpoint_t *setpoint, state_t *s
     if (setpoint->timestamp != lastSetpointTimestamp) {
         lastSetpointTimestamp = setpoint->timestamp;
         fc_set_setpoint(setpoint);
+    }
+
+    /* ponytail: 1S pack assumed (ESP-Drone S3 kit); divide by the cell count for larger packs. 0 V before
+     * pmInit (e.g. the P4 diagnostic profile) is rejected by fc_push_battery, so no low-battery action. */
+    if (++batteryTick >= FC_MS_TO_TICKS(100)) {
+        batteryTick = 0;
+        fc_push_battery(pmGetBatteryVoltage());
     }
 
     if (emergencyStop) fc_emergency_stop(); /* latched until reboot, unlike the stabilizer flag */

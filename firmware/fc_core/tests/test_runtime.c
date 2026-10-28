@@ -7,6 +7,7 @@
 #include "fc_runtime.h"
 #include "fc_step.h"
 #include "fc_vars.h"
+#include "pm_esplane.h"
 #include "queue.h"
 #include "system.h"
 #include "unity.h"
@@ -45,6 +46,8 @@ void commanderGetSetpoint(setpoint_t *setpoint, const state_t *state)
     *setpoint = commanded;
 }
 bool systemIsArmed(void) { return armedFake; }
+static float batteryFake;
+float pmGetBatteryVoltage(void) { return batteryFake; }
 
 /* ---- helpers ---- */
 static sensorData_t level;
@@ -77,6 +80,7 @@ void setUp(void)
     commanded.mode.x = commanded.mode.y = commanded.mode.z = modeAbs;
     commanded.position.z = 1;
     armedFake = false;
+    batteryFake = 0; /* power management not initialised: no reading */
     memset(&level, 0, sizeof(level));
     level.acc.z = 1;
     fcRuntimeInit();
@@ -137,11 +141,25 @@ static void test_arm_follows_system_and_emergency_stop_latches(void)
     for (unsigned m = 0; m < 4; m++) TEST_ASSERT_EQUAL(0, fc_host_motor_ratio(m));
 }
 
+/* Pack voltage reaches fc_step's low-battery check (refuses arming here); 0 V (pm not running) is ignored. */
+static void test_battery_voltage_reaches_fc_step(void)
+{
+    ready();
+    armedFake = true;
+    tick(false);
+    TEST_ASSERT_TRUE(fc_is_armed()); /* 0 V never blocks */
+    armedFake = false;
+    batteryFake = 3.1f;
+    for (unsigned i = 0; i < FC_MS_TO_TICKS(200); i++) tick(false);
+    TEST_ASSERT_EQUAL_FLOAT(3.1f, (float)safety_log("batteryV"));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
     RUN_TEST(test_measurements_from_other_tasks_reach_fc_step);
     RUN_TEST(test_only_new_setpoints_refresh_the_command_watchdog);
     RUN_TEST(test_arm_follows_system_and_emergency_stop_latches);
+    RUN_TEST(test_battery_voltage_reaches_fc_step);
     return UNITY_END();
 }

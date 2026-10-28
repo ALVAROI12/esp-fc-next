@@ -72,6 +72,7 @@ typedef enum {
 #define FC_FAILSAFE_REASON_TIMEOUT 8u
 #define FC_FAILSAFE_REASON_INVALID_STATE 16u
 #define FC_FAILSAFE_REASON_BLIND 32u /* LAND continued without any height source (bounded) */
+#define FC_FAILSAFE_REASON_LOW_BATTERY 64u
 #define FC_FAILSAFE_POSITION_TIMEOUT_MS 300
 #define FC_FAILSAFE_TOF_TIMEOUT_MS 200
 #define FC_FAILSAFE_HOLD_MS 1500
@@ -96,6 +97,10 @@ typedef enum {
 #define FC_FAILSAFE_BLIND_SETTLE_MS 1000
 #define FC_FAILSAFE_FLOW_TIMEOUT_MS 100
 #define FC_FAILSAFE_FLOW_MIN_HEIGHT_M 0.12f
+/* Loaded cell voltage below this for FC_FAILSAFE_LOW_BATTERY_MS lands (safe mode); also refuses arming.
+ * ponytail: fixed LiPo threshold; a sag-compensated (current-aware) estimate needs current sensing. */
+#define FC_FAILSAFE_LOW_BATTERY_V 3.3f
+#define FC_FAILSAFE_LOW_BATTERY_MS 1000
 
 /* Disarmed-only. Disabled in a fresh process, preserving the legacy commander watchdog.
  * LANDED/FAULT (and an interrupted LAND) require fc_init() before rearming. */
@@ -146,6 +151,8 @@ void fc_set_trajectory_setpoint(float x, float y, float z, float vx, float vy, f
 bool fc_push_position(float x, float y, float z, float std_dev);
 bool fc_push_tof(float distance_m, float std_dev);
 bool fc_push_flow(float dpixel_x, float dpixel_y, float dt, float std_dev);
+/* Battery voltage per cell (pack voltage / cell count); rejects nonfinite or outside (0, 5] V. */
+bool fc_push_battery(float cell_volts);
 
 /* One loop iteration. gyro in deg/s, acc in g, both in the body frame (x fwd, y left, z up). */
 void fc_step(const float gyro_dps[3], const float acc_g[3]);

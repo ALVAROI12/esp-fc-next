@@ -69,6 +69,9 @@ static struct {
     bool haveFlow, flowLanding, blind, blindCap;
     uint32_t blindTick, blindLastTick;
     float hoverThrust; /* EMA of the commanded thrust while airborne with a height source */
+    float batteryV;
+    bool haveBattery, lowBatteryPending;
+    uint32_t lowBatteryTick;
     uint32_t flowTick;
     uint8_t flowFresh, flowBrake;
 } fc;
@@ -209,7 +212,8 @@ bool fc_arm(bool armed)
     float norm = sqrtf(ax * ax + ay * ay + az * az);
     if (fc.phase != FC_PHASE_READY || fc.emergencyStop || fc.tumbled ||
         (!fc.armed && fc.safetyState >= FC_FAILSAFE_LAND) ||
-        (failsafeEnabled && (!position_fresh() || !tof_fresh() || !state_valid())) ||
+        (failsafeEnabled && (!position_fresh() || !tof_fresh() || !state_valid() ||
+                             (fc.haveBattery && fc.batteryV < FC_FAILSAFE_LOW_BATTERY_V))) ||
         !isfinite(norm) || norm < 0.8f || norm > 1.2f ||
         az / norm < cosf(FC_ARM_MAX_TILT_DEG * 0.0174532925f) || tilt_deg() > FC_ARM_MAX_TILT_DEG) {
         return false;
@@ -330,6 +334,27 @@ bool fc_push_flow(float dpixel_x, float dpixel_y, float dt, float std_dev)
     if (!fcKalmanPushFlow(&m)) return false;
     if (qualified) { fc.haveFlow = true; fc.flowTick = fc.tick; }
     return true;
+}
+
+bool fc_push_battery(float cell_volts)
+{
+    if (!isfinite(cell_volts) || cell_volts <= 0 || cell_volts > 5.0f) return false;
+    fc.batteryV = cell_volts;
+    fc.haveBattery = true;
+    return true;
+}
+
+static bool battery_low(void)
+{
+    if (!fc.haveBattery || fc.batteryV >= FC_FAILSAFE_LOW_BATTERY_V) {
+        fc.lowBatteryPending = false;
+        return false;
+    }
+    if (!fc.lowBatteryPending) {
+        fc.lowBatteryPending = true;
+        fc.lowBatteryTick = fc.tick;
+    }
+    return (uint32_t)(fc.tick - fc.lowBatteryTick) >= FC_MS_TO_TICKS(FC_FAILSAFE_LOW_BATTERY_MS);
 }
 
 static void calibrate(const float gyro[3], const float acc[3])
@@ -453,7 +478,11 @@ static void apply_failsafe(const float gyro[3], const float acc[3])
             memset(&fc.activeSetpoint, 0, sizeof(fc.activeSetpoint));
             return;
         }
-        if (!fc.posFresh) {
+        if (battery_low()) {
+            fc.safetyReason |= FC_FAILSAFE_REASON_LOW_BATTERY;
+            if (fc.safetyState == FC_FAILSAFE_NORMAL) capture_hold();
+            start_land();
+        } else if (!fc.posFresh) {
             fc.safetyReason |= FC_FAILSAFE_REASON_TRACK;
             if (fc.safetyState == FC_FAILSAFE_NORMAL) capture_hold();
             start_land();
@@ -683,6 +712,7 @@ LOG_ADD(LOG_FLOAT, holdY, &fc.holdY)
 LOG_ADD(LOG_FLOAT, holdZ, &fc.holdZ)
 LOG_ADD(LOG_FLOAT, height, &fc.height)
 LOG_ADD(LOG_FLOAT, hoverThrust, &fc.hoverThrust)
+LOG_ADD(LOG_FLOAT, batteryV, &fc.batteryV)
 LOG_GROUP_STOP(fcSafety)
 
 LOG_GROUP_START(fcGyro)

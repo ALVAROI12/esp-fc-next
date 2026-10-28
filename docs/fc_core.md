@@ -202,7 +202,9 @@ not activate a new production P4 task loop or change any CRTP packet formats.
 | LANDED (3) | Height <= 4 cm and estimated vertical speed <= 0.15 m/s for 500 ms (thrust capped at 0.99 x hover during the dwell, so a biased estimate cannot hold it a few cm up): disarm and block automatic rearm |
 | FAULT (4) | No trustworthy height near the ground or after the blind budget, invalid state, or landing timeout: motor stop; **not** successful controlled landing |
 
-Camera input older than 300 ms triggers LAND even if commands still arrive. XY hold is allowed only
+Camera input older than 300 ms triggers LAND even if commands still arrive. So does a reported cell
+voltage (`fc_push_battery`, pack voltage / cells) below 3.3 V for 1 s while flying (reason bit 64), from a
+held pose; a low pack also refuses arming. Short sags reset the 1 s timer. XY hold is allowed only
 with fresh tracking; after tracking loss it uses local velocity braking when qualified flow/range
 is available, otherwise level roll/pitch. It never resumes absolute XY hold in that landing.
 Independent ToF (200 ms freshness, tilt checked)

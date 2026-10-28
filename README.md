@@ -20,8 +20,9 @@ With qualified local flow/range, emergency velocity braking reduces nominal came
 from 1.71-1.72 m to **0.28-0.29 m** in SITL ([comparison](sim/reports/flow_braking/README.md)).
 Total-height-loss recovery remains open; this does not close the absolute-positioning requirement.
 
-`make swarm` flies four firmware copies in lockstep (layers, formation, diagonal swap) with link-loss and
-camera-dropout faults; all land safely in SITL ([report](sim/reports/swarm/README.md)). No downwash or battery model.
+`make swarm` flies four firmware copies in lockstep (layers, formation, diagonal swap) with link-loss,
+camera-dropout and low-battery faults; all land safely in SITL ([report](sim/reports/swarm/README.md)).
+No downwash model; low battery is a voltage step, not a discharge model.
 
 ## Layout
 

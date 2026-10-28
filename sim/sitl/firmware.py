@@ -109,6 +109,7 @@ class FlightFirmware:
             "fc_push_position": (b, [f, f, f, f]),
             "fc_push_tof": (b, [f, f]),
             "fc_push_flow": (b, [f, f, f, f]),
+            "fc_push_battery": (b, [f]),
             "fc_set_rpm_notch": (b, [b, f]),
             "fc_push_rpm": (b, [C.POINTER(f)]),
             "fc_set_failsafe_enabled": (b, [b]),
@@ -197,6 +198,9 @@ class FlightFirmware:
 
     def push_flow(self, dpx: float, dpy: float, dt: float, std: float) -> bool:
         return bool(self._lib.fc_push_flow(dpx, dpy, dt, std))
+
+    def push_battery(self, cell_volts: float) -> bool:
+        return bool(self._lib.fc_push_battery(cell_volts))
 
     def step(self, gyro_dps, acc_g, time_us: int) -> tuple[int, int, int, int]:
         """Run one main-loop tick; returns the four motor ratios (0..65535)."""

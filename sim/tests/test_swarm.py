@@ -16,3 +16,10 @@ def test_link_loss_in_formation_lands_faulted_drone_and_finishes_mission():
     assert r["outcomes"][0]["terminal"] == FAILSAFE_LANDED
     assert all(o["safe_landing"] for o in r["outcomes"])
     assert r["passed"]
+
+
+def test_low_battery_lands_faulted_drone_and_finishes_mission():
+    r = fly_mission(fault="battery", fault_drone=2)
+    assert r["outcomes"][2]["terminal"] == FAILSAFE_LANDED
+    assert all(o["safe_landing"] for o in r["outcomes"])
+    assert r["passed"]

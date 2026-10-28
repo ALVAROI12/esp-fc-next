@@ -130,6 +130,7 @@ class SitlDrone:
             "flow": round(self.rate / FLOW_RATE_HZ),
             "tof": round(self.rate / TOF_RATE_HZ),
             "rpm": round(self.rate / 100),
+            "battery": round(self.rate / 10),
         }
         # MocapModel counts latency in calls, and it is sampled every `every["mocap"]` ticks.
         self.mocap = MocapModel(sensors.mocap, self.rng, self.every["mocap"] * self.dt) if positioning == "mocap" else None
@@ -148,6 +149,7 @@ class SitlDrone:
         self.tracking_offset = np.zeros(3)  # injected camera reference jump for recovery tests
         self.height_up = True  # onboard downward range only
         self.flow_up = True
+        self.battery_cell_v: float | None = None  # pushed at 10 Hz when set; no discharge or thrust-sag model
         self.flow_scale = 1.0  # injected calibration bias, not truth fed to control
         self.flow_latency_s = 0.0
         self.tof_bias_m = 0.0  # mounting offset: range reads this much long at every height
@@ -206,6 +208,8 @@ class SitlDrone:
             if latest is not None and self.flow_up:
                 self.fw.push_flow(latest[0] * self.flow_scale, latest[1] * self.flow_scale,
                                   self.every["flow"] * self.dt, FLOW_STD_REPORTED)
+        if self.battery_cell_v is not None and self.tick % self.every["battery"] == 0:
+            self.fw.push_battery(self.battery_cell_v)
         if self.tof and self.tick % self.every["tof"] == 0:
             d = self.tof.sample(s.pos[2], rot)
             if self.height_up and d is not None and (self.safe_landing or s.pos[2] > 0.03):
