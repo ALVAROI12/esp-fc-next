@@ -6,7 +6,7 @@ documents fetched 2026-10-28; re-check against the latest revisions before layou
 ## Decisions
 | Topic | Decision | Why |
 | --- | --- | --- |
-| Form factor | Two-board stack: 25.5 mm FC (20x20 mm M2 holes) + radio board with ESP32-C5-MINI-1 | C5-MINI-1 is 15.4 x 21.3 mm; P4 + power + sensors + C5 do not fit one whoop board. Radio swappable. |
+| Form factor | Two-board stack: 28 mm FC (20x20 mm M2 holes) + 28 mm radio board with ESP32-C5-MINI-1 | C5-MINI-1 is 15.4 x 21.3 mm; P4 + power + sensors + C5 do not fit one whoop board. Radio swappable. |
 | Battery | 1S only (1S HV, 3.0-4.35 V) | Plan section 4.1. 2S would need a wider-input regulator and 2S ESC. |
 | 3.3 V rail | Buck-boost TPS63802 (2 A) | P4 needs 3.0-3.6 V; an LDO drops out at 3.0 V cell voltage. Budget about 0.9 A peak (below). |
 | Core rail | TLV62569 buck from 3.3 V, driven by P4 EN_DCDC / FB_DCDC | Espressif-verified part and reference circuit (below). |
@@ -113,20 +113,52 @@ sheet loads in KiCad, passes KiCad's ERC and exports a netlist identical in conn
 (FB resistor, GPIO36 pull-up, shunt value, C5 pin, FB_DCDC wire, wrong footprint, missing footprint, routed sheets,
 unquoted symbol text, a missing PWR_FLAG) each fail a test.
 
-## PCB placement (`make hw-pcb`)
-`pcb.py` (run by KiCad's Python) turns each netlist into `out/<board>.kicad_pcb`: 25.5 mm square, 4 layers, M2 holes
-on a 20 mm square, every footprint with its nets, greedy courtyard placement on a 0.125 mm grid. Fixed: the stack
+## PCB placement and routing (`make hw-pcb`)
+`pcb.py` (run by KiCad's Python) turns each netlist into `out/<board>.kicad_pcb`: 28 mm square, 4 layers, M2 holes
+on a 20 mm square, every footprint with its nets, greedy courtyard placement on a 0.1 mm grid. Fixed: the stack
 header on the left edge between the holes (FC: header on top; radio: socket on the bottom, same pad XY and nets),
-USB-C on the bottom edge. The P4, crystal and IMU stay on top; the rest may go underneath. pF/nF caps are 0201: with
-0402 the flight board did not fit (16 caps left over at ~85 % courtyard fill). Not routed. The rules in
-`out/<board>.kicad_pro` (0.1 mm track/space, 0.3/0.15 mm vias) are generic placeholders, not a fab's limits.
-GND: solid plane on In1, pours on F.Cu and B.Cu (In2 free for routing); unconnected items fall 244 -> 169 (FC) and
-54 -> 18 (radio). The rest needs routing and GND stitching vias.
+USB-C on the bottom edge. Order: P4, connectors (edge strips), crystal and IMU (top only), then by size; no connector
+under the P4 (it blocked the fanout of a motor pin). A 0.25 mm fanout ring round the P4 courtyard keeps other parts
+(not the edge or the hole keep-outs) away: with the 0201 caps at the normal 0.15 mm, two P4 pins (`M2`, `FLASH_CK`)
+had no room for their escape vias; rings of 0.3-0.35 mm moved the choke point to other pins and 0.4 mm and up no
+longer fit every part. pF/nF caps are 0201: with 0402 the 25.5 mm flight board did not fit (16 caps left over at
+~85 % courtyard fill). The boards are 28 mm, not 25.5: at 25.5 mm the same FC placement routed clean in one run and
+left one or two P4 fanout nets in three others (a 0.35 mm pitch LGA with 0.3/0.15 mm vias and 0.25 mm hole-to-hole);
+27 mm still left one net every run, 6 layers at 25.5 mm routed but left a GND stray, 28 mm routed at the first
+attempt with room to spare (top 508 / 629 mm2 at 27 mm). 28 mm is a common whoop FC size on the same 20 x 20 mm
+mounts. GND: one solid plane on In1 (the reference for every signal, 0.1 mm clearance: at 0.2 the voids
+round the via field under the P4 merged and split the plane); In2 for signals. Netclasses: `Power` (battery,
+converter switch nodes and rails, listed in `pcb.py`) 0.3 mm, everything else 0.1 mm.
+
+`route.py` autoroutes with Freerouting 2.5.0 (Java 25+, `brew install openjdk`; jar from
+github.com/freerouting/freerouting/releases/tag/v2.5.0 into `hardware/tools/`, git-ignored, sha256
+f6f51bb02245e8e717f9359bd260cc9c5c0b1bc0acc8b7cb2cd5b8ffeb5de3c7) to `out/<board>-routed.kicad_pcb`:
+- The In1 plane goes to the router with 0.2 mm clearance (at 0.1 it fanned GND pads out into voids it could not
+  then use) and is refilled at 0.1 mm afterwards. In1 stays a signal layer for the router: declared a power layer
+  it left 73 FC nets unrouted, so signal tracks do cross the plane.
+- Freerouting routes at 0.1 mm spacing against the 0.09 mm rule: it models the P4's oval pad ends as octagons, up to
+  7.6 um short, and KiCad's exact check then fails at 0.1/0.1.
+- Freerouting takes the DSN plane for solid copper, but the via field and the In1 tracks cut KiCad's fill into
+  about ten pieces, so GND stubs it counted as "on the plane" sit on nothing. GND pours on F.Cu and B.Cu are added
+  after routing (in the DSN they made the router skip GND pads sitting on them) and join every stub to GND copper
+  nearby; islands that reach nothing are removed. Dogbone vias and bridge tracks placed by script were tried first:
+  under the P4 and by the stack header there is no spot for either.
+- Its 0.075 mm fanout necks are widened to 0.09 mm except where KiCad DRC then reports clearance (those stay at
+  0.075 mm: `track_width` violations, two on the FC board, outside the copper set the test checks).
+- Freerouting is deterministic for a given DSN (six runs, six identical results), but KiCad's DSN exporter orders
+  components, images, padstacks and nets by their random UUIDs, so the same board routed clean in one run and left
+  a net in the next. `route.py` sorts the DSN by name before routing (`canonical()`); a retry uses a different
+  repeatable order (nets reversed, components reversed, both), up to four attempts.
+
+Result: both boards fully routed, KiCad DRC with no unconnected items and no clearance, short, hole or edge errors.
+Remaining DRC: the FC stack header courtyard overlaps two M2 hole courtyards (header body clears an M2 head by
+~0.5 mm); the radio board's C5 module courtyard overlaps all four hole courtyards, and two holes sit next to the
+antenna keep-out. Rules in `out/<board>.kicad_pro` (0.1 mm tracks, 0.09 mm minimum track/space, 0.3/0.15 mm vias,
+0.075 mm annular ring) are generic placeholders, not a fab's limits. Tests: both boards fit, the stack pads line up
+with the same nets (a wrong bottom-side rotation fails it), and each routed board passes the copper DRC with zero
+unconnected items (skipped without Java or the jar; about 2.5 min for the whole file at 28 mm, 15 min when the
+25.5 mm board made the router retry).
 `make hw-pcb` also renders `out/render/*.png` and plots the power-path transient to `out/power_transient.png`.
-KiCad DRC after placement, besides unrouted nets and silkscreen: the FC stack header courtyard overlaps two M2 hole
-courtyards (header body clears an M2 head by ~0.5 mm); the radio board's C5 module courtyard overlaps all four hole
-courtyards, and two holes sit next to the antenna keep-out. Test: both boards fit, and the stack pads line up with
-the same nets (a wrong bottom-side rotation fails it).
 
 ## Libraries
 `lib/espressif/`: Espressif official KiCad symbols (ESP32-P4X, ESP32-C5-MINI-1) and footprints, CC-BY-SA 4.0 with
@@ -140,8 +172,8 @@ input (recorded in `UPSTREAM`). Inductors: Coilcraft XFL4020-471ME (TI lists XFL
 land pattern) and Murata DFE201610E-2R2M.
 
 ## Open items
-- `ESPFC` footprints follow the datasheet drawings; not yet checked against a physical part or a fab's DRC rules
-  (needs the PCB layout).
+- `ESPFC` footprints follow the datasheet drawings; they pass KiCad DRC on the routed boards with placeholder rules,
+  not yet checked against a physical part or a chosen fab's rules.
 - ICM-42688-P against TDK Rev 1.8 once the document can be downloaded.
 - GPIO34 level: only matters once the JTAG-select eFuse is burned; confirm with the P4 TRM.
 - VDD_FLASH_IO fed from 3V3 directly (allowed 1.65-3.6 V); the EV board's choice not confirmed.
@@ -151,5 +183,8 @@ land pattern) and Murata DFE201610E-2R2M.
 - Sheets are machine-placed and dense (one A3 page per board); connectivity is verified, readability is not.
 - Stack height: the FC top carries a 4.25 mm tall JST-SH vertical and the USB-C; the stack connector must clear them.
 - Radio board: M2 screws next to the antenna; nylon screws there, or a different hole pattern on that board.
-- Routing, ground pours, via fanout under the P4 and the fab's rules; 3D models for the P4 and C5 (pads only now).
+- Autorouted, not reviewed by a human: return paths, the 40 MHz crystal and USB D+/D- (not length-matched or
+  impedance-controlled), current capacity of the 3V3/VSYS/VBAT tracks (all 0.1 mm now; the battery path needs real
+  copper width or pours), via-in-pad, assembly (0201 with solid GND connections). Pick a fab and set its rules.
+- 3D models for the P4 and C5 (pads only in the renders).
 - Not simulated: converter loop stability, C5 TX burst transients on 3V3, layout parasitics.

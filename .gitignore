@@ -30,3 +30,6 @@ hardware/*.log
 hardware/*.erc
 hardware/*_sklib.py
 hardware/*-erc.rpt
+
+# Freerouting jar (make hw-route downloads nothing; fetch it per hardware/DESIGN.md)
+hardware/tools/*.jar

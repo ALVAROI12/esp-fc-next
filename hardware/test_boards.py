@@ -239,7 +239,7 @@ def test_pcb_placement_fits_both_boards_and_the_stack_pins_line_up(tmp_path):
         boards.build(name).generate_netlist(file_=str(tmp_path / f"{name}.net"))
         pcb = tmp_path / f"{name}.kicad_pcb"
         fit = subprocess.run([str(KICAD_PY), str(boards.HERE / "pcb.py"), str(tmp_path / f"{name}.net"), str(pcb),
-                              "25.5", "20"], capture_output=True, text=True)
+                              "28", "20"], capture_output=True, text=True)
         assert fit.returncode == 0, fit.stdout
         side, *rows = subprocess.run([str(KICAD_PY), "-c", STACK_PADS, str(pcb)], capture_output=True, text=True,
                                      check=True).stdout.split("\n")[:-1]
@@ -247,3 +247,26 @@ def test_pcb_placement_fits_both_boards_and_the_stack_pins_line_up(tmp_path):
     (fc_side, fc), (radio_side, radio) = pads["fc_board"], pads["radio_board"]
     assert (fc_side, radio_side) == ("top", "bottom")  # header up on the FC, socket down on the radio board
     assert len(fc) == 12 and fc == radio  # same XY carries the same net on both boards
+
+
+JAR = boards.HERE / "tools/freerouting-2.5.0.jar"
+
+
+@pytest.mark.skipif(not (KICAD_PY.exists() and JAR.exists() and Path("/opt/homebrew/opt/openjdk/bin/java").exists()),
+                    reason="needs KiCad's Python, Java 25+ and the Freerouting jar (DESIGN.md)")
+@pytest.mark.parametrize("name", list(boards.BOARDS))
+def test_routed_board_is_complete_and_passes_copper_drc(name, tmp_path):
+    boards.build(name).generate_netlist(file_=str(tmp_path / f"{name}.net"))
+    pcb = tmp_path / f"{name}.kicad_pcb"
+    for script, *args in (("pcb.py", tmp_path / f"{name}.net", pcb, "28", "20"), ("route.py", pcb, "80")):
+        run = subprocess.run([str(KICAD_PY), str(boards.HERE / script), *map(str, args)], capture_output=True, text=True)
+        assert run.returncode == 0, run.stdout[-2000:] + run.stderr[-2000:]
+    drc = tmp_path / "drc.json"
+    subprocess.run([KICAD_CLI, "pcb", "drc", "--format", "json", "--severity-all", "-o", str(drc),
+                    str(tmp_path / f"{name}-routed.kicad_pcb")], capture_output=True, check=True)
+    report = json.loads(drc.read_text())
+    # Errors only: dangling vias/stubs the router's optimizer leaves are warnings (redundant copper, not opens).
+    copper = {"clearance", "shorting_items", "hole_clearance", "hole_to_hole", "copper_edge_clearance",
+              "annular_width", "starved_thermal", "isolated_copper"}
+    assert [v["description"] for v in report["violations"] if v["type"] in copper] == []
+    assert report["unconnected_items"] == []

@@ -118,12 +118,14 @@ hw:
 
 KICAD_PY = /Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3
 KICAD_CLI = /Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli
-# First-pass PCB placement, 3D renders and the power-path plot in hardware/out/ (after `make hw`).
+# PCB placement + Freerouting autoroute, 3D renders and the power-path plot in hardware/out/ (after `make hw`;
+# routing needs Java 25+ and hardware/tools/freerouting-2.5.0.jar, see hardware/DESIGN.md).
 hw-pcb:
 	cd hardware && mkdir -p out/render && for b in fc_board radio_board; do \
-	  $(KICAD_PY) pcb.py out/$$b.net out/$$b.kicad_pcb 25.5 20 && for s in top bottom; do \
+	  $(KICAD_PY) pcb.py out/$$b.net out/$$b.kicad_pcb 28 20 || exit 1; $(KICAD_PY) route.py out/$$b.kicad_pcb 80 || exit 1; \
+	  for s in top bottom; do \
 	  $(KICAD_CLI) pcb render --side $$s --width 1400 --height 1400 --quality high --zoom 1 --background opaque \
-	  -o out/render/$$b-$$s.png out/$$b.kicad_pcb || exit 1; done; done
+	  -o out/render/$$b-$$s.png out/$$b-routed.kicad_pcb || exit 1; done; done
 	cd hardware && uv run -q --with matplotlib --with-requirements requirements.txt python plot_power.py
 
 # Gate G1 math-model report -> sim/reports/g1/README.md (non-zero exit if the gate fails).

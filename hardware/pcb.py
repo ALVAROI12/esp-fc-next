@@ -2,7 +2,7 @@
 Not routed. It answers "does it fit", and gives layout a starting file.
 
 Runs under KiCad's own Python (pcbnew):  <KiCad.app>/Contents/Frameworks/Python.framework/Versions/Current/bin/python3
-    pcb.py out/fc_board.net out/fc_board.kicad_pcb 25.5 20      (board side mm, hole spacing mm; 0 = no holes)
+    pcb.py out/fc_board.net out/fc_board.kicad_pcb 28 20 [4]    (board side mm, hole spacing mm; 0 = no holes; copper layers)
 Prints a fit report; parts that did not fit are left beside the board.
 """
 import json
@@ -18,11 +18,28 @@ KICAD_FP = Path("/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints
 LIBS = {"ESPFC": HERE / "lib/ESPFC.pretty", "PCM_Espressif": HERE / "lib/espressif/Espressif.pretty"}
 RAILS = {"GND", "3V3", "VDD_HP", "VSYS", "VBAT"}  # too common to pull parts towards anything
 CENTER = (100.0, 100.0)  # board centre on the KiCad page, mm
-GAP, EDGE, STEP = 0.15, 0.3, 0.125 # courtyard spacing, keep-in from the edge, placement grid (mm)
+GAP, EDGE, STEP = 0.15, 0.3, 0.1  # courtyard spacing, keep-in from the edge, placement grid (mm)
+# Ring round the P4 courtyard that only tracks and vias may use: its 0.35 mm pitch pins need two staggered rows of
+# 0.3 mm vias (0.4 mm pitch) to escape; at GAP the 0201 caps left M2 and FLASH_CK unroutable. Not counted against
+# the board edge (the P4 stays flush with it); 0.6 pushed the P4 right and J3 off the edge, 0.45 keeps J3's spot.
+FANOUT = 0.25
 # Fixed spots by value, (x, y, degrees) from the board centre. The stack header must sit at the same place on both
 # boards: left edge, between the M2 holes. USB-C on the bottom edge, its "PCB Edge" mark (y=3.1) on the board edge.
 FIXED = {"STACK": (-10.5, -7.0, 0), "USB_C_Receptacle_USB2.0_14P": (0, 12.75 - 3.1, 0)}
 BOTTOM = {"radio_board": {"STACK"}}  # the radio board sits on top, its stack socket faces down
+
+
+# Battery, converter and rail nets: up to ~1.5 A (buck-boost input at 2.4 V and full 3.3 V load).
+# ponytail: one width for all; 0.3 mm outer 1 oz runs ~20 C over ambient at 1.5 A (IPC-2152), pours if it gets hot.
+POWER = ["VBAT", "VBAT_SHUNT", "VSYS", "BB_L1", "BB_L2", "3V3", "VBUS", "HP_SW", "VDD_HP"]
+POWER_WIDTH = 0.3
+
+
+def netclass(name, width, priority):
+    return {"name": name, "clearance": 0.09, "track_width": width, "via_diameter": 0.3, "via_drill": 0.15,
+            "microvia_diameter": 0.3, "microvia_drill": 0.1, "diff_pair_width": 0.1, "diff_pair_gap": 0.1,
+            "wire_width": 6, "bus_width": 12, "line_style": 0, "pcb_color": "rgba(0, 0, 0, 0.000)",
+            "schematic_color": "rgba(0, 0, 0, 0.000)", "priority": priority}
 
 
 def mm(v):
@@ -57,6 +74,7 @@ def outline(board, side, holes):
             for sy in (-1, 1):
                 fp = pcbnew.FootprintLoad(str(KICAD_FP / "MountingHole.pretty"), "MountingHole_2.2mm_M2")
                 fp.SetReference(f"H{len(keepouts) + 1}")
+                fp.Reference().SetLayer(pcbnew.F_Fab)
                 fp.SetPosition(pcbnew.VECTOR2I(mm(CENTER[0] + sx * holes / 2), mm(CENTER[1] + sy * holes / 2)))
                 board.Add(fp)
                 r = courtyard(fp)[2]  # the footprint's courtyard: M2 screw head plus margin
@@ -93,10 +111,10 @@ def free(rect, placed, half, edge=EDGE):
     return all(x2 + GAP <= a1 or a2 + GAP <= x1 or y2 + GAP <= b1 or b2 + GAP <= y1 for a1, b1, a2, b2 in placed)
 
 
-def main(netlist, out, side, holes):
+def main(netlist, out, side, holes, layers=4):
     comps, nets = parse(netlist)
     board = pcbnew.BOARD()
-    board.SetCopperLayerCount(4)
+    board.SetCopperLayerCount(layers)
     keepouts = outline(board, side, holes)
     netinfo = {}
     for name in nets:
@@ -163,7 +181,12 @@ def main(netlist, out, side, holes):
     def area(r):
         x1, y1, x2, y2 = courtyard(fps[r])
         return (x2 - x1) * (y2 - y1)
-    order = sorted((r for r in fps if r not in where), key=lambda r: (r not in first, -area(r)))
+
+    def rect_of(r):
+        x1, y1, x2, y2 = courtyard(fps[r])
+        return (where[r][0] + x1, where[r][1] + y1, where[r][0] + x2, where[r][1] + y2)
+    # P4 first, then connectors (they need edge strips), then the other top-only parts, then by size.
+    order = sorted((r for r in fps if r not in where), key=lambda r: (r != "U1", r[0] != "J", r not in first, -area(r)))
     for ref in order:
         fp = fps[ref]
         near = [where[r] for r in links[ref] if r in where]
@@ -182,9 +205,17 @@ def main(netlist, out, side, holes):
             for angle in (0, 90):
                 fp.SetOrientationDegrees(angle)
                 cx1, cy1, cx2, cy2 = courtyard(fp)
+                # No connectors or test points under the P4: a body there blocks the pin fanout vias (TP2 under the
+                # P4 left U0RXD unrouted in some runs).
+                blocked = [rect_of("U1")] if layer == "bottom" and ref[:2] in ("J", "TP") and "U1" in where else []
+                ring = FANOUT if fp.GetValue().startswith("ESP32-P4") else 0
                 for x, y in spots:
-                    rect = (x + cx1, y + cy1, x + cx2, y + cy2)
-                    if all(free(rect, placed[s], half) for s in (["top", "bottom"] if through(fp) else [layer])):
+                    core = (x + cx1, y + cy1, x + cx2, y + cy2)
+                    rect = (core[0] - ring, core[1] - ring, core[2] + ring, core[3] + ring)
+                    # The ring keeps parts away; the edge and the M2 hole keep-outs see the bare courtyard.
+                    if all(free(core, placed[s][:len(keepouts)], half) and
+                           free(rect, placed[s][len(keepouts):] + blocked, half, EDGE - ring)
+                           for s in (["top", "bottom"] if through(fp) else [layer])):
                         put(ref, fp, layer, x, y, [rect])
                         done = True
                         break
@@ -202,39 +233,36 @@ def main(netlist, out, side, holes):
     for fp in fps.values():  # reference designators on the fab layer: a 25 mm board has no room for them on silk
         fp.Reference().SetLayer(pcbnew.B_Fab if fp.IsFlipped() else pcbnew.F_Fab)
 
-    # GND: solid plane on In1 (reference for every signal on top), pours on the outer layers. In2 left for routing.
-    # ponytail: no power planes; split In2 into VSYS/3V3 islands if the router can't carry the currents.
-    for layer in (pcbnew.In1_Cu, pcbnew.F_Cu, pcbnew.B_Cu):
-        zone = pcbnew.ZONE(board)
-        zone.SetLayer(layer)
-        zone.SetNet(netinfo["GND"])
-        zone.SetLocalClearance(mm(0.2))
-        zone.SetMinThickness(mm(0.15))
-        zone.SetIslandRemovalMode(pcbnew.ISLAND_REMOVAL_MODE_ALWAYS)
-        zone.SetAssignedPriority(0 if layer == pcbnew.In1_Cu else 1)
-        poly = zone.Outline()
-        poly.NewOutline()
-        for x, y in ((-half, -half), (half, -half), (half, half), (-half, half)):
-            poly.Append(mm(CENTER[0] + x), mm(CENTER[1] + y))
-        board.Add(zone)
+    # GND: one solid plane on In1, the reference for every signal; each GND pad gets its own via to it when routed.
+    # No outer pours: on a board this dense they break into fragments between the tracks. In2 for signals.
+    zone = pcbnew.ZONE(board)
+    zone.SetLayer(pcbnew.In1_Cu)
+    zone.SetNet(netinfo["GND"])
+    zone.SetLocalClearance(mm(0.1))  # 0.2 let the voids round the via field under the P4 merge and split the plane
+    zone.SetMinThickness(mm(0.15))
+    zone.SetIslandRemovalMode(pcbnew.ISLAND_REMOVAL_MODE_ALWAYS)
+    zone.SetPadConnection(pcbnew.ZONE_CONNECTION_FULL)  # vias and through-hole pads join the plane solid
+    poly = zone.Outline()
+    poly.NewOutline()
+    for x, y in ((-half, -half), (half, -half), (half, half), (-half, half)):
+        poly.Append(mm(CENTER[0] + x), mm(CENTER[1] + y))
+    board.Add(zone)
     pcbnew.ZONE_FILLER(board).Fill(board.Zones())
 
     pcbnew.SaveBoard(str(out), board)
-    # Netclass rules live in the project file. ponytail: generic fine-pitch 4-layer values (0.1 mm track/space,
-    # 0.3/0.15 mm vias); replace with the chosen fab's published limits before ordering.
+    # Netclass rules live in the project file. ponytail: generic fine-pitch 4-layer values (0.1 mm tracks, 0.09 mm
+    # minimum track/space, 0.3/0.15 mm vias; route.py routes at 0.1 mm spacing); replace with the chosen fab's limits.
     Path(out).with_suffix(".kicad_pro").write_text(json.dumps({
         "meta": {"filename": Path(out).with_suffix(".kicad_pro").name, "version": 3},
         "board": {"design_settings": {"rules": {
-            "min_clearance": 0.1, "min_track_width": 0.1, "min_via_diameter": 0.3, "min_through_hole_diameter": 0.15,
-            "min_hole_clearance": 0.15, "min_copper_edge_clearance": 0.2, "min_hole_to_hole": 0.25}}},
-        "net_settings": {"meta": {"version": 4}, "classes": [{
-            "name": "Default", "clearance": 0.1, "track_width": 0.1, "via_diameter": 0.3, "via_drill": 0.15,
-            "microvia_diameter": 0.3, "microvia_drill": 0.1, "diff_pair_width": 0.1, "diff_pair_gap": 0.1,
-            "wire_width": 6, "bus_width": 12, "line_style": 0, "pcb_color": "rgba(0, 0, 0, 0.000)",
-            "schematic_color": "rgba(0, 0, 0, 0.000)", "priority": 2147483647}]}}, indent=2))
+            "min_clearance": 0.09, "min_track_width": 0.09, "min_via_diameter": 0.3, "min_through_hole_diameter": 0.15,
+            "min_hole_clearance": 0.15, "min_via_annular_width": 0.075, "min_copper_edge_clearance": 0.2, "min_hole_to_hole": 0.25}}},
+        "net_settings": {"meta": {"version": 4}, "classes": [
+            netclass("Default", 0.1, 2147483647), netclass("Power", POWER_WIDTH, 0)],
+            "netclass_patterns": [{"netclass": "Power", "pattern": n} for n in POWER]}}, indent=2))
     area = side * side - sum((k[2] - k[0]) * (k[3] - k[1]) for k in keepouts)
     used = {s: sum((r[2] - r[0]) * (r[3] - r[1]) for r in placed[s][len(keepouts):]) for s in placed}
-    print(f"{Path(out).name}: {len(fps)} parts, board {side} mm, 4 layers")
+    print(f"{Path(out).name}: {len(fps)} parts, board {side} mm, {layers} layers")
     print(f"  courtyard area used: top {used['top']:.0f} / {area:.0f} mm2, bottom {used['bottom']:.0f} / {area:.0f} mm2")
     print(f"  did not fit ({len(unplaced)}): {' '.join(f'{r}({fps[r].GetValue()})' for r in unplaced) or 'none'}")
     return unplaced
@@ -242,4 +270,4 @@ def main(netlist, out, side, holes):
 
 if __name__ == "__main__":
     netlist, out, side, holes = sys.argv[1], sys.argv[2], float(sys.argv[3]), float(sys.argv[4])
-    sys.exit(1 if main(netlist, out, side, holes) else 0)
+    sys.exit(1 if main(netlist, out, side, holes, int(sys.argv[5]) if len(sys.argv) > 5 else 4) else 0)

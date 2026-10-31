@@ -1,4 +1,4 @@
-"""ESP-FC Next hardware as code (SKiDL): the 25.5 mm P4 flight controller and the stacked C5 radio board.
+"""ESP-FC Next hardware as code (SKiDL): the 28 mm P4 flight controller and the stacked C5 radio board.
 
 `python boards.py` writes KiCad netlists to out/. Sources and decisions: DESIGN.md. Checks: test_boards.py.
 """
@@ -28,7 +28,7 @@ P4 = dict(IMU_CS=7, IMU_MOSI=8, IMU_SCLK=9, IMU_MISO=10, IMU_INT=11,  # SPI2 IO 
 C5 = dict(C5_MOSI=8, C5_MISO=9, C5_SCLK=6, C5_CS=10, P4_TX=12, P4_RX=11)  # UART0: RX=12 gets P4_TX
 
 R0402, C0402, C0603 = "Resistor_SMD:R_0402_1005Metric", "Capacitor_SMD:C_0402_1005Metric", "Capacitor_SMD:C_0603_1608Metric"
-C0201 = "Capacitor_SMD:C_0201_0603Metric"  # pF/nF caps: the 25.5 mm board does not fit them all as 0402
+C0201 = "Capacitor_SMD:C_0201_0603Metric"  # pF/nF caps: at 25.5 mm the board did not fit them all as 0402
 
 
 def r(a, b, value, fp=R0402):
@@ -101,6 +101,7 @@ def fc_board():
     lx = Part("Device", "L", value="0.47u XFL4020-471ME", footprint="Inductor_SMD:L_Coilcraft_XxL4020")
     lx[1] += bb["L1"]
     lx[2] += bb["L2"]
+    lx[1].net.name, lx[2].net.name = "BB_L1", "BB_L2"  # switch nodes: named for the Power netclass
     fb = Net("BB_FB")
     bb["FB"] += fb
     r(v33, fb, "511k")
@@ -118,6 +119,7 @@ def fc_board():
     c(v33, gnd, "4.7u", C0603)
     l2 = Part("Device", "L", value="2.2u DFE201610E-2R2M", footprint="Inductor_SMD:L_Murata_DFE201610P")
     l2[1] += buck["SW"]
+    l2[1].net.name = "HP_SW"
     l2[2] += vhp
     hp_fb = Net("HP_FB")
     buck["FB"] += hp_fb
