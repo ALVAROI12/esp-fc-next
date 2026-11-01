@@ -266,7 +266,9 @@ def test_routed_board_is_complete_and_passes_copper_drc(name, tmp_path):
                     str(tmp_path / f"{name}-routed.kicad_pcb")], capture_output=True, check=True)
     report = json.loads(drc.read_text())
     # Errors only: dangling vias/stubs the router's optimizer leaves are warnings (redundant copper, not opens).
+    # Everything JLCPCB's own check would reject (rules in pcb.py; same set as route.COPPER).
     copper = {"clearance", "shorting_items", "hole_clearance", "hole_to_hole", "copper_edge_clearance",
-              "annular_width", "starved_thermal", "isolated_copper"}
+              "annular_width", "track_width", "via_diameter", "drill_too_small", "solder_mask_bridge",
+              "starved_thermal", "isolated_copper"}
     assert [v["description"] for v in report["violations"] if v["type"] in copper] == []
     assert report["unconnected_items"] == []

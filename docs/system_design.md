@@ -159,7 +159,8 @@ Emergency stop, explicit disarm and tumble (> 70 deg for 300 ms) override everyt
 - Startup calibration (1024 + 200 samples) is a time policy to be set, not a count.
 - ToF offset, thrust sag at low battery, blind sink rate `FC_FAILSAFE_BLIND_MIN_SINK_MPS` (0.2) are calibration
   knobs; 1S cell count is assumed in the battery push.
-- SPI pins and Wi-Fi channel are Kconfig placeholders; DRC rules are placeholders until a fab is chosen.
+- SPI pins and Wi-Fi channel are Kconfig placeholders. DRC rules are JLCPCB's 4-layer limits (`hardware/pcb.py`);
+  JLCPCB's own DFM check on the uploaded Gerbers is the final word.
 - The In1 plane is cut by signal tracks and vias; return paths are not analysed. Fine for a 4 kHz loop and
   10-20 MHz SPI on a 25 mm board, to be checked with the first boards (ringing on SPI, IMU noise floor).
 

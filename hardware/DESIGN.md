@@ -141,24 +141,45 @@ f6f51bb02245e8e717f9359bd260cc9c5c0b1bc0acc8b7cb2cd5b8ffeb5de3c7) to `out/<board
 - Freerouting takes the DSN plane for solid copper, but the via field and the In1 tracks cut KiCad's fill into
   about ten pieces, so GND stubs it counted as "on the plane" sit on nothing. GND pours on F.Cu and B.Cu are added
   after routing (in the DSN they made the router skip GND pads sitting on them) and join every stub to GND copper
-  nearby; islands that reach nothing are removed. Dogbone vias and bridge tracks placed by script were tried first:
-  under the P4 and by the stack header there is no spot for either.
-- Its 0.075 mm fanout necks are widened to 0.09 mm except where KiCad DRC then reports clearance (those stay at
-  0.075 mm: `track_width` violations, two on the FC board, outside the copper set the test checks).
+  nearby; islands that reach nothing are removed. What the pours cannot fix is a GND via landing on a cut-off piece
+  of the In1 plane (an 8 x 12 mm piece on the FC board, holding one BMP581 GND pad): `stitch()` walks the GND copper
+  as clusters (pads, tracks and vias by KiCad's connectivity, each pour island as a node) and puts one GND via into
+  every stray island where it overlaps a connected island on another layer, clear of all other copper.
+- Freerouting's geometry is octagonal, so against KiCad's exact check a track can sit a few um too close to a hole
+  (up to 5 um short on 0.1 mm tracks, 11 um on 0.3 mm ones). `finish()` runs KiCad DRC and narrows the offending
+  track by the shortfall (floor 0.09 mm; the router's 0.075 mm fanout necks are first widened to 0.09 and may go back
+  to 0.076, JLCPCB's "3 mil in BGA fan-outs", inside the P4 courtyard). Through-hole padstacks grow by 0.16 mm in the
+  DSN only, so the router keeps JLCPCB's 0.28 mm from plated holes to copper (the 1.0 mm stack header pads have a
+  0.175 mm ring). An attempt counts as done only when the finished board passes the copper DRC with nothing
+  unconnected; otherwise the next element order is tried.
 - Freerouting is deterministic for a given DSN (six runs, six identical results), but KiCad's DSN exporter orders
   components, images, padstacks and nets by their random UUIDs, so the same board routed clean in one run and left
   a net in the next. `route.py` sorts the DSN by name before routing (`canonical()`); a retry uses a different
   repeatable order (nets reversed, components reversed, both), up to four attempts.
 
-Result: both boards fully routed, KiCad DRC with no unconnected items and no clearance, short, hole or edge errors.
-Remaining DRC: the FC stack header courtyard overlaps two M2 hole courtyards (header body clears an M2 head by
-~0.5 mm); the radio board's C5 module courtyard overlaps all four hole courtyards, and two holes sit next to the
-antenna keep-out. Rules in `out/<board>.kicad_pro` (0.1 mm tracks, 0.09 mm minimum track/space, 0.3/0.15 mm vias,
-0.075 mm annular ring) are generic placeholders, not a fab's limits. Tests: both boards fit, the stack pads line up
-with the same nets (a wrong bottom-side rotation fails it), and each routed board passes the copper DRC with zero
-unconnected items (skipped without Java or the jar; about 2.5 min for the whole file at 28 mm, 15 min when the
-25.5 mm board made the router retry).
+Rules are JLCPCB's 4-layer, 1 oz limits (jlcpcb.com/capabilities/pcb-capabilities, read 2026-10-31), written by
+`pcb.py` to `out/<board>.kicad_pro` and `.kicad_dru`: 0.09 mm track and space (routed at 0.1), vias 0.15 mm hole with
+a 0.35 mm pad (JLCPCB wants 0.2 mm from a via hole to copper, met exactly at 0.1 mm clearance; 0.37 and 0.38 mm pads,
+a 0.115 mm Power-class clearance and typed DSN clearances such as `wire_via` all left P4 fanout nets unrouted, so the
+few-um shortfalls are repaired after routing instead), via hole-to-hole 0.2, copper-to-edge 0.2, solder mask dam 0.1
+with no mask expansion (JLCPCB opens 1:1), and conditional rules for through-hole pads (0.28 hole-to-copper, 0.15
+ring, 0.45 hole-to-hole), a 0.15 mm gap between SMD pads, and 0.19 mm for a footprint's own NPTH pegs (the KiCad USB-C
+footprint puts them 0.194 mm from its GND pads). Not expressible in KiCad: JLCPCB's 0.25 mm same-net track spacing.
+The test's copper set is everything JLCPCB's check would reject: clearance, shorts, hole clearance, hole-to-hole, edge
+clearance, annular ring, track width, via size, drill size, mask bridges, starved thermals, isolated copper, plus zero
+unconnected items.
+
+Result: both boards fully routed at the first attempt and clean against those rules (FC 1460 tracks, 170 vias).
+Remaining DRC, not fab-related: the FC stack header courtyard overlaps two M2 hole courtyards (header body clears
+an M2 head by ~0.5 mm); the radio board's C5 module courtyard overlaps all four hole courtyards, and two holes sit
+inside the antenna keep-out (`items_not_allowed`).
+Tests: both boards fit, the stack pads line up with the same nets (a wrong bottom-side rotation fails it), and each
+routed board passes the copper DRC with zero unconnected items (skipped without Java or the jar; 14 min for the
+whole file with the DRC-gated routing of both boards).
 `make hw-pcb` also renders `out/render/*.png` and plots the power-path transient to `out/power_transient.png`.
+`make hw-gerbers` writes `out/gerbers/<board>.zip` for the JLCPCB order form: Gerber X1 with Protel extensions
+(copper, paste, silk, mask, Edge.Cuts), Excellon PTH and NPTH drills plus a drill map, all on the absolute origin.
+JLCPCB's own DFM check on upload is the final word on the footprints.
 
 ## Libraries
 `lib/espressif/`: Espressif official KiCad symbols (ESP32-P4X, ESP32-C5-MINI-1) and footprints, CC-BY-SA 4.0 with
@@ -172,8 +193,8 @@ input (recorded in `UPSTREAM`). Inductors: Coilcraft XFL4020-471ME (TI lists XFL
 land pattern) and Murata DFE201610E-2R2M.
 
 ## Open items
-- `ESPFC` footprints follow the datasheet drawings; they pass KiCad DRC on the routed boards with placeholder rules,
-  not yet checked against a physical part or a chosen fab's rules.
+- `ESPFC` footprints follow the datasheet drawings; they pass KiCad DRC on the routed boards with JLCPCB's rules,
+  not yet checked against a physical part or JLCPCB's own DFM check.
 - ICM-42688-P against TDK Rev 1.8 once the document can be downloaded.
 - GPIO34 level: only matters once the JTAG-select eFuse is burned; confirm with the P4 TRM.
 - VDD_FLASH_IO fed from 3V3 directly (allowed 1.65-3.6 V); the EV board's choice not confirmed.
@@ -185,6 +206,6 @@ land pattern) and Murata DFE201610E-2R2M.
 - Radio board: M2 screws next to the antenna; nylon screws there, or a different hole pattern on that board.
 - Autorouted, not reviewed by a human: return paths, the 40 MHz crystal and USB D+/D- (not length-matched or
   impedance-controlled), current capacity of the 3V3/VSYS/VBAT tracks (all 0.1 mm now; the battery path needs real
-  copper width or pours), via-in-pad, assembly (0201 with solid GND connections). Pick a fab and set its rules.
+  copper width or pours), via-in-pad, assembly (0201 with solid GND connections).
 - 3D models for the P4 and C5 (pads only in the renders).
 - Not simulated: converter loop stability, C5 TX burst transients on 3V3, layout parasitics.

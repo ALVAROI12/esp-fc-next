@@ -36,7 +36,7 @@ POWER_WIDTH = 0.3
 
 
 def netclass(name, width, priority):
-    return {"name": name, "clearance": 0.09, "track_width": width, "via_diameter": 0.3, "via_drill": 0.15,
+    return {"name": name, "clearance": 0.09, "track_width": width, "via_diameter": 0.35, "via_drill": 0.15,
             "microvia_diameter": 0.3, "microvia_drill": 0.1, "diff_pair_width": 0.1, "diff_pair_gap": 0.1,
             "wire_width": 6, "bus_width": 12, "line_style": 0, "pcb_color": "rgba(0, 0, 0, 0.000)",
             "schematic_color": "rgba(0, 0, 0, 0.000)", "priority": priority}
@@ -250,16 +250,31 @@ def main(netlist, out, side, holes, layers=4):
     pcbnew.ZONE_FILLER(board).Fill(board.Zones())
 
     pcbnew.SaveBoard(str(out), board)
-    # Netclass rules live in the project file. ponytail: generic fine-pitch 4-layer values (0.1 mm tracks, 0.09 mm
-    # minimum track/space, 0.3/0.15 mm vias; route.py routes at 0.1 mm spacing); replace with the chosen fab's limits.
+    # Rules: JLCPCB 4-layer, 1 oz outer copper (jlcpcb.com/capabilities/pcb-capabilities, 2026-10): 0.09 mm
+    # track/space, via 0.15 hole with a 0.35 pad so hole-to-copper is 0.2 at the 0.1 mm routing clearance (0.37 and
+    # 0.38 pads left P4 fanout nets unrouted; route.py narrows a track where the router's octagons leave a few um
+    # short; a 0.115 clearance for the Power class alone left nets unrouted too), via hole-to-hole 0.2,
+    # copper-to-edge 0.2, mask dam 0.1 (mask opening 1:1, so expansion 0), 0.076 mm (JLCPCB: "3 mil in BGA fan-outs") for the
+    # router's necks inside the P4 courtyard. Conditional rules in the .kicad_dru: PTH hole to copper 0.28, ring 0.15,
+    # hole-to-hole 0.45; 0.15 pad-to-pad gap; the USB-C footprint's own NPTH pegs sit 0.194 from its GND pads.
     Path(out).with_suffix(".kicad_pro").write_text(json.dumps({
         "meta": {"filename": Path(out).with_suffix(".kicad_pro").name, "version": 3},
         "board": {"design_settings": {"rules": {
-            "min_clearance": 0.09, "min_track_width": 0.09, "min_via_diameter": 0.3, "min_through_hole_diameter": 0.15,
-            "min_hole_clearance": 0.15, "min_via_annular_width": 0.075, "min_copper_edge_clearance": 0.2, "min_hole_to_hole": 0.25}}},
+            "min_clearance": 0.09, "min_track_width": 0.09, "min_via_diameter": 0.25, "min_through_hole_diameter": 0.15,
+            "min_hole_clearance": 0.2, "min_via_annular_width": 0.05, "min_copper_edge_clearance": 0.2, "min_hole_to_hole": 0.2,
+            "solder_mask_clearance": 0.0, "solder_mask_min_width": 0.1, "solder_mask_to_copper_clearance": 0.0}}},
         "net_settings": {"meta": {"version": 4}, "classes": [
             netclass("Default", 0.1, 2147483647), netclass("Power", POWER_WIDTH, 0)],
             "netclass_patterns": [{"netclass": "Power", "pattern": n} for n in POWER]}}, indent=2))
+    Path(out).with_suffix(".kicad_dru").write_text('(version 1)\n'
+        '(rule "JLCPCB PTH hole to copper" (constraint hole_clearance (min 0.28mm))'
+        ' (condition "A.Pad_Type == \'Through-hole\' || B.Pad_Type == \'Through-hole\'"))\n'  # both ways: the zone filler asks with A = zone
+        '(rule "JLCPCB PTH annular ring" (constraint annular_width (min 0.15mm)) (condition "A.Pad_Type == \'Through-hole\'"))\n'
+        '(rule "JLCPCB PTH hole to hole" (constraint hole_to_hole (min 0.45mm))'
+        ' (condition "A.Pad_Type == \'Through-hole\' || B.Pad_Type == \'Through-hole\'"))\n'
+        '(rule "JLCPCB SMD pad to pad" (constraint clearance (min 0.15mm)) (condition "A.Type == \'Pad\' && B.Type == \'Pad\'"))\n'
+        '(rule "footprint-internal NPTH" (constraint hole_clearance (min 0.19mm)) (condition "A.Reference == B.Reference"))\n'
+        '(rule "JLCPCB 3 mil in BGA fan-outs" (constraint track_width (min 0.076mm)) (condition "A.insideCourtyard(\'U1\')"))\n')
     area = side * side - sum((k[2] - k[0]) * (k[3] - k[1]) for k in keepouts)
     used = {s: sum((r[2] - r[0]) * (r[3] - r[1]) for r in placed[s][len(keepouts):]) for s in placed}
     print(f"{Path(out).name}: {len(fps)} parts, board {side} mm, {layers} layers")

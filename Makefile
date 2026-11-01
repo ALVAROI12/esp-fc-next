@@ -128,6 +128,15 @@ hw-pcb:
 	  -o out/render/$$b-$$s.png out/$$b-routed.kicad_pcb || exit 1; done; done
 	cd hardware && uv run -q --with matplotlib --with-requirements requirements.txt python plot_power.py
 
+# JLCPCB upload: hardware/out/gerbers/<board>.zip (Gerber X1 with Protel extensions, Excellon drills, one origin).
+hw-gerbers:
+	cd hardware && for b in fc_board radio_board; do rm -rf out/gerbers/$$b && mkdir -p out/gerbers/$$b && \
+	  $(KICAD_CLI) pcb export gerbers -l F.Cu,In1.Cu,In2.Cu,B.Cu,F.Paste,B.Paste,F.Silkscreen,B.Silkscreen,F.Mask,B.Mask,Edge.Cuts \
+	    --no-x2 --no-netlist --subtract-soldermask -o out/gerbers/$$b/ out/$$b-routed.kicad_pcb || exit 1; \
+	  $(KICAD_CLI) pcb export drill --excellon-separate-th --generate-map --map-format gerberx2 \
+	    -o out/gerbers/$$b/ out/$$b-routed.kicad_pcb || exit 1; \
+	  (cd out/gerbers && rm -f $$b.zip && zip -q -r $$b.zip $$b) || exit 1; done
+
 # Gate G1 math-model report -> sim/reports/g1/README.md (non-zero exit if the gate fails).
 g1:
 	cd sim && .venv/bin/python g1_report.py
