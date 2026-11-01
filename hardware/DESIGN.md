@@ -180,6 +180,15 @@ whole file with the DRC-gated routing of both boards).
 `make hw-gerbers` writes `out/gerbers/<board>.zip` for the JLCPCB order form: Gerber X1 with Protel extensions
 (copper, paste, silk, mask, Edge.Cuts), Excellon PTH and NPTH drills plus a drill map, all on the absolute origin.
 JLCPCB's own DFM check on upload is the final word on the footprints.
+The same target runs `assembly.py`, which writes `out/assembly/<board>-bom.csv` (Comment, Designator, Footprint,
+LCSC Part #) and `<board>-cpl.csv` (Designator, Mid X, Mid Y, Layer, Rotation) in the column layout JLCPCB's
+assembly form expects; mounting holes and test points are excluded. The LCSC numbers live in a table in
+`assembly.py` (looked up 2026-11-01): ICs, sensors, connectors, switch, crystal, diode and the 2.2 uH inductor have
+one; passives are blank so JLCPCB matches them by value and footprint. Without a listing: the ESP32-C5-MINI-1
+module (consign it or buy from Espressif's distributors), the 0.47 uH XFL4020 inductor (series not stocked;
+Coilcraft's drop-in is the XGL4020-471MEC) and the 1.27 mm stack header (hand-solder). The ESP32-P4NRW16X maps to
+JLCPCB's "ESP32-P4NRW16" listing, which needs confirming on upload. Rotations are KiCad's; check polarised parts
+(D1, C2, the ICs' pin 1) in JLCPCB's placement preview before paying.
 
 ## Libraries
 `lib/espressif/`: Espressif official KiCad symbols (ESP32-P4X, ESP32-C5-MINI-1) and footprints, CC-BY-SA 4.0 with

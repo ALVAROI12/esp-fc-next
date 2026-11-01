@@ -1,4 +1,5 @@
 """Scripted netlist checks of boards.py (gate G4) plus the ngspice power-path check."""
+import csv
 import json
 import re
 import shutil
@@ -272,3 +273,14 @@ def test_routed_board_is_complete_and_passes_copper_drc(name, tmp_path):
               "starved_thermal", "isolated_copper"}
     assert [v["description"] for v in report["violations"] if v["type"] in copper] == []
     assert report["unconnected_items"] == []
+    # JLCPCB assembly files: every placed part (holes and test points excluded) once in the BOM and once in the CPL.
+    run = subprocess.run([str(KICAD_PY), str(boards.HERE / "assembly.py"), str(tmp_path / f"{name}-routed.kicad_pcb"),
+                          str(tmp_path)], capture_output=True, text=True)
+    assert run.returncode == 0, run.stdout[-2000:] + run.stderr[-2000:]
+    bom = list(csv.DictReader(open(tmp_path / f"{name}-bom.csv")))
+    cpl = list(csv.DictReader(open(tmp_path / f"{name}-cpl.csv")))
+    placed = sorted(r["Designator"] for r in cpl)
+    assert sorted(ref for r in bom for ref in r["Designator"].split(",")) == placed
+    assert len(placed) == int(re.search(r"(\d+) parts", run.stdout).group(1)) > 0
+    assert not [ref for ref in placed if ref.startswith(("H", "TP"))]
+    assert all(r["Comment"] and r["Footprint"] for r in bom) and all(r["Layer"] in ("Top", "Bottom") for r in cpl)
