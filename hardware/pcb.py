@@ -23,6 +23,7 @@ GAP, EDGE, STEP = 0.15, 0.3, 0.1  # courtyard spacing, keep-in from the edge, pl
 # 0.3 mm vias (0.4 mm pitch) to escape; at GAP the 0201 caps left M2 and FLASH_CK unroutable. Not counted against
 # the board edge (the P4 stays flush with it); 0.6 pushed the P4 right and J3 off the edge, 0.45 keeps J3's spot.
 FANOUT = 0.25
+BAND = 0.6  # bottom-side keep-out inside the P4's pin rows (the fanout vias), see the frame below
 # Fixed spots by value, (x, y, degrees) from the board centre. The stack header must sit at the same place on both
 # boards: left edge, between the M2 holes. USB-C on the bottom edge, its "PCB Edge" mark (y=3.1) on the board edge.
 FIXED = {"STACK": (-10.5, -7.0, 0), "USB_C_Receptacle_USB2.0_14P": (0, 12.75 - 3.1, 0)}
@@ -154,14 +155,15 @@ def main(netlist, out, side, holes, layers=4):
             placed[side_] += rects
         where[ref] = (x, y)
 
-    # Modules with a keep-out (the C5 antenna) go first, antenna flush with the top edge, keep-out on both sides.
+    # Modules with a keep-out (the C5 antenna) go first: the antenna hangs over the top edge, so its keep-out lies
+    # beyond the board (flush with the edge it held two M2 holes and the screws next to the antenna).
     for ref, fp in fps.items():
         if fp.Zones():
             angle = min((0, 90, 180, 270), key=lambda a: (fp.SetOrientationDegrees(a), zone_box(fp)[1])[1])
             fp.SetOrientationDegrees(angle)
             zx1, zy1, zx2, zy2 = zone_box(fp)
             cx1, cy1, cx2, cy2 = courtyard(fp)
-            y = -half - zy1
+            y = -half - zy2
             put(ref, fp, "top", -(cx1 + cx2) / 2, y, [(-(cx2 - cx1) / 2, y + cy1, (cx2 - cx1) / 2, y + cy2),
                                                      (-(cx1 + cx2) / 2 + zx1, y + zy1, -(cx1 + cx2) / 2 + zx2, y + zy2)])
 
@@ -185,12 +187,79 @@ def main(netlist, out, side, holes, layers=4):
     def rect_of(r):
         x1, y1, x2, y2 = courtyard(fps[r])
         return (where[r][0] + x1, where[r][1] + y1, where[r][0] + x2, where[r][1] + y2)
-    # P4 first, then connectors (they need edge strips), then the other top-only parts, then by size.
-    order = sorted((r for r in fps if r not in where), key=lambda r: (r != "U1", r[0] != "J", r not in first, -area(r)))
+    def crystal():
+        """Y1 and its load caps beside the P4's XTAL pins (pins 99/100 face right with the P4 at 270 degrees): a few
+        mm of F.Cu, no vias. Greedy placement put the crystal 13 mm from the pins (25/42 mm traces, 3 vias each, 21 mm
+        of them cutting the In1 plane) and the caps 12 mm away at the top corners."""
+        xtal = {p.GetNetname(): p.GetPosition() for p in fps["U1"].Pads() if p.GetNetname().startswith("XTAL_")}
+        y = sum(pcbnew.ToMM(p.y) for p in xtal.values()) / len(xtal) - CENTER[1]
+        fp = fps["Y1"]
+        fp.SetOrientationDegrees(270)  # pad 1 (XTAL_P) top-left towards pin 100, pad 3 (XTAL_N) bottom-right
+        cx1, cy1, cx2, cy2 = courtyard(fp)
+        x = rect_of("U1")[2] + FANOUT + GAP - cx1
+        put("Y1", fp, "top", x, y, [(x + cx1, y + cy1, x + cx2, y + cy2)])
+        for net, below in (("XTAL_P", False), ("XTAL_N", True)):
+            ref = next(r for r in fps if r not in where and any(p.GetNetname() == net for p in fps[r].Pads()))
+            cap = fps[ref]
+            cap.SetOrientationDegrees(0)
+            kx1, ky1, kx2, ky2 = courtyard(cap)
+            cy = y + (cy2 + GAP - ky1 if below else cy1 - GAP - ky2)
+            put(ref, cap, "top", x, cy, [(x + kx1, cy + ky1, x + kx2, cy + ky2)])
+
+    def beside(ref, anchor):
+        """`ref` next to `anchor` on the same side, at the anchor's edge nearest their shared pins. The buck-boost
+        inductor and its TPS63802 share the switch nodes BB_L1/BB_L2: placed apart (inductor on the bottom, IC on
+        top) the router squeezed BB_L1 to 0.09 mm for 3.6 mm between other tracks, a fuse at the inductor current."""
+        fp, a = fps[ref], fps[anchor]
+        if fp.IsFlipped() != a.IsFlipped():
+            fp.Flip(fp.GetPosition(), pcbnew.FLIP_DIRECTION_LEFT_RIGHT)
+        layer = "bottom" if a.IsFlipped() else "top"
+        ax1, ay1, ax2, ay2 = rect_of(anchor)
+        shared = ({p.GetNetname() for p in fp.Pads()} & {p.GetNetname() for p in a.Pads()}) - RAILS - {""}
+        best = None
+        for angle in (0, 90, 180, 270):
+            fp.SetOrientationDegrees(angle)
+            cx1, cy1, cx2, cy2 = courtyard(fp)
+            for x, y in ((ax1 - GAP - cx2, (ay1 + ay2) / 2), (ax2 + GAP - cx1, (ay1 + ay2) / 2),
+                         ((ax1 + ax2) / 2, ay1 - GAP - cy2), ((ax1 + ax2) / 2, ay2 + GAP - cy1)):
+                rect = (x + cx1, y + cy1, x + cx2, y + cy2)
+                if not all(free(rect, placed[s], half) for s in (["top", "bottom"] if through(fp) else [layer])):
+                    continue
+                fp.SetPosition(pcbnew.VECTOR2I(mm(CENTER[0] + x), mm(CENTER[1] + y)))
+                d = sum(min((p.GetPosition() - q.GetPosition()).EuclideanNorm() for q in a.Pads()
+                            if q.GetNetname() == p.GetNetname()) for p in fp.Pads() if p.GetNetname() in shared)
+                if best is None or d < best[0]:
+                    best = (d, angle, x, y, rect)
+        if best:
+            _, angle, x, y, rect = best
+            fp.SetOrientationDegrees(angle)
+            put(ref, fp, layer, x, y, [rect])
+
+    # P4 first, then connectors (they need edge strips), then the other top-only parts, then the big parts (over
+    # 8 mm2: inductors, ICs, bulk caps; placed after the 0201 caps the 4 mm inductor found no square left), then
+    # the 100n decoupling caps (they fit the gaps next to the ICs), then by size.
+    order = sorted((r for r in fps if r not in where),
+                   key=lambda r: (r != "U1", r[0] != "J", r not in first, area(r) < 8, fps[r].GetValue() != "100n",
+                                  -area(r)))
+    decoupled = {}  # rail net -> (x, y) of the decoupling caps placed on it
+    frame = []  # bottom-side keep-out round the P4's pin rows, set once U1 is placed
     for ref in order:
+        if ref in where:  # the crystal cluster
+            continue
         fp = fps[ref]
         near = [where[r] for r in links[ref] if r in where]
         tx, ty = (sum(p[0] for p in near) / len(near), sum(p[1] for p in near) / len(near)) if near else (0, 0)
+        rail = None
+        if not near and ref[0] == "C":
+            # Decoupling cap (rails only, no neighbour): aim at the IC rail pin farthest from the caps already on
+            # that rail, so each supply pin of the P4 gets its own cap next to it. Without this the 100n caps
+            # were placed last by size and ended up along the board edges, 10 mm from the chip.
+            rail = next((p.GetNetname() for p in fp.Pads() if p.GetNetname() not in ("GND", "")), None)
+            pins = [(pcbnew.ToMM(p.GetPosition().x) - CENTER[0], pcbnew.ToMM(p.GetPosition().y) - CENTER[1])
+                    for r in where if r[0] == "U" for p in fps[r].Pads() if p.GetNetname() == rail]
+            if pins:
+                tx, ty = max(pins, key=lambda q: min((math.hypot(q[0] - c[0], q[1] - c[1])
+                                                      for c in decoupled.get(rail, [])), default=0))
         if ref[0] == "J":  # connectors: as close to an edge as they fit
             spots = sorted(((x, y) for x in grid for y in grid), key=lambda p: (half - max(abs(p[0]), abs(p[1])),
                                                                                  math.hypot(p[0] - tx, p[1] - ty)))
@@ -198,31 +267,52 @@ def main(netlist, out, side, holes, layers=4):
             spots = sorted(((x, y) for x in grid for y in grid), key=lambda p: math.hypot(p[0] - tx, p[1] - ty))
         # The P4, crystal and IMU stay on top; everything else may go underneath.
         sides = ["top"] if ref in first else ["top", "bottom"]
-        done = False
+        best = None  # the first spot that fits on either side, at either angle: (spot rank, layer, angle, x, y, rect)
         for layer in sides:
             if (layer == "bottom") != fp.IsFlipped():
                 fp.Flip(fp.GetPosition(), pcbnew.FLIP_DIRECTION_LEFT_RIGHT)
-            for angle in (0, 90):
+            for angle in ((270,) if ref == "U1" else (0, 90)):  # P4 XTAL pins to the right, see crystal()
                 fp.SetOrientationDegrees(angle)
                 cx1, cy1, cx2, cy2 = courtyard(fp)
                 # No connectors or test points under the P4: a body there blocks the pin fanout vias (TP2 under the
-                # P4 left U0RXD unrouted in some runs).
-                blocked = [rect_of("U1")] if layer == "bottom" and ref[:2] in ("J", "TP") and "U1" in where else []
+                # P4 left U0RXD unrouted in some runs). Nothing else on the pin rows either: parts there go inside
+                # the frame (under the thermal pads) or outside the fanout ring.
+                blocked = []
+                if layer == "bottom" and "U1" in where:
+                    # Small parts only: a 0201 pad on a pin row takes the via's spot, an IC body does not.
+                    blocked = [rect_of("U1")] if ref[0] == "J" or ref[:2] == "TP" else frame if area(ref) < 8 else []
                 ring = FANOUT if fp.GetValue().startswith("ESP32-P4") else 0
-                for x, y in spots:
+                for i, (x, y) in enumerate(spots):
+                    if best and i >= best[0]:
+                        break
                     core = (x + cx1, y + cy1, x + cx2, y + cy2)
                     rect = (core[0] - ring, core[1] - ring, core[2] + ring, core[3] + ring)
                     # The ring keeps parts away; the edge and the M2 hole keep-outs see the bare courtyard.
                     if all(free(core, placed[s][:len(keepouts)], half) and
                            free(rect, placed[s][len(keepouts):] + blocked, half, EDGE - ring)
                            for s in (["top", "bottom"] if through(fp) else [layer])):
-                        put(ref, fp, layer, x, y, [rect])
-                        done = True
+                        best = (i, layer, angle, x, y, rect)
                         break
-                if done:
-                    break
-            if done:
-                break
+        done = best is not None
+        if done:
+            _, layer, angle, x, y, rect = best
+            if (layer == "bottom") != fp.IsFlipped():
+                fp.Flip(fp.GetPosition(), pcbnew.FLIP_DIRECTION_LEFT_RIGHT)
+            fp.SetOrientationDegrees(angle)
+            put(ref, fp, layer, x, y, [rect])
+            if rail:
+                decoupled.setdefault(rail, []).append((x, y))
+            if ref == "U1":
+                crystal()
+                # The P4's fanout vias sit within ~1 mm of its two pin rows, on both sides of the board: on the
+                # bottom, keep that frame (pin box grown to the fanout ring, less the inner square) free of parts.
+                ox1, oy1, ox2, oy2 = rect  # courtyard plus the ring
+                px = [pcbnew.ToMM(p.GetPosition().x) - CENTER[0] for p in fp.Pads()]
+                py = [pcbnew.ToMM(p.GetPosition().y) - CENTER[1] for p in fp.Pads()]
+                ix1, iy1, ix2, iy2 = min(px) + BAND, min(py) + BAND, max(px) - BAND, max(py) - BAND
+                frame = [(ox1, oy1, ox2, iy1), (ox1, iy2, ox2, oy2), (ox1, iy1, ix1, iy2), (ix2, iy1, ox2, iy2)]
+            if fp.GetValue().startswith("0.47u"):  # the buck-boost inductor: its TPS63802 goes right beside it
+                beside(next(r for r in fps if fps[r].GetValue() == "TPS63802"), ref)
         if not done:
             if fp.IsFlipped():
                 fp.Flip(fp.GetPosition(), pcbnew.FLIP_DIRECTION_LEFT_RIGHT)

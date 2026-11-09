@@ -214,8 +214,9 @@ def test_drawn_schematic_loads_passes_kicad_erc_and_matches_the_netlist(name, tm
     run = lambda *a: subprocess.run([KICAD_CLI, "sch", *a, str(sch)], capture_output=True, text=True, check=True)
     run("erc", "--format", "json", "--severity-all", "-o", str(tmp_path / "erc.json"))
     # Library-table warnings only say this sandbox's KiCad has no global symbol/footprint tables configured.
+    # lib_symbol_mismatch: the sheet's symbol copies differ from the installed KiCad library, not a circuit error.
     real = [v for s in json.loads((tmp_path / "erc.json").read_text())["sheets"] for v in s["violations"]
-            if v["type"] not in ("lib_symbol_issues", "footprint_link_issues")]
+            if v["type"] not in ("lib_symbol_issues", "lib_symbol_mismatch", "footprint_link_issues")]
     assert real == []
     out = run("export", "netlist", "-o", str(tmp_path / "drawn.net"))
     assert "annotation" not in out.stdout + out.stderr
@@ -231,6 +232,24 @@ for fp in pcbnew.LoadBoard(sys.argv[1]).GetFootprints():
         for p in fp.Pads():
             print(round(pcbnew.ToMM(p.GetPosition().x), 2), round(pcbnew.ToMM(p.GetPosition().y), 2), p.GetNetname())
 """
+# Small bottom-side parts on the P4's pin rows, where its fanout vias go (pcb.py's frame; big parts are allowed).
+ON_P4_ROWS = """
+import sys, pcbnew
+sys.path.insert(0, sys.argv[2])
+from pcb import BAND, FANOUT
+mm = pcbnew.ToMM
+fps = {f.GetReference(): f for f in pcbnew.LoadBoard(sys.argv[1]).GetFootprints()}
+xs, ys = zip(*((mm(p.GetPosition().x), mm(p.GetPosition().y)) for p in fps["U1"].Pads()))
+c = fps["U1"].GetCourtyard(pcbnew.F_CrtYd).BBox()
+ox1, oy1, ox2, oy2 = mm(c.GetLeft()) - FANOUT, mm(c.GetTop()) - FANOUT, mm(c.GetRight()) + FANOUT, mm(c.GetBottom()) + FANOUT
+ix1, iy1, ix2, iy2 = min(xs) + BAND, min(ys) + BAND, max(xs) - BAND, max(ys) - BAND
+for ref, f in fps.items():
+    b = f.GetCourtyard(pcbnew.B_CrtYd).BBox()
+    x1, y1, x2, y2 = mm(b.GetLeft()), mm(b.GetTop()), mm(b.GetRight()), mm(b.GetBottom())
+    if (f.IsFlipped() and (x2 - x1) * (y2 - y1) < 8 and x1 < ox2 and x2 > ox1 and y1 < oy2 and y2 > oy1
+            and not (x1 >= ix1 and x2 <= ix2 and y1 >= iy1 and y2 <= iy2)):
+        print(ref)
+"""
 
 
 @pytest.mark.skipif(not KICAD_PY.exists(), reason="needs KiCad's Python (pcbnew)")
@@ -245,6 +264,10 @@ def test_pcb_placement_fits_both_boards_and_the_stack_pins_line_up(tmp_path):
         side, *rows = subprocess.run([str(KICAD_PY), "-c", STACK_PADS, str(pcb)], capture_output=True, text=True,
                                      check=True).stdout.split("\n")[:-1]
         pads[name] = (side, sorted(rows))
+        if name == "fc_board":
+            on_rows = subprocess.run([str(KICAD_PY), "-c", ON_P4_ROWS, str(pcb), str(boards.HERE)], capture_output=True,
+                                     text=True, check=True).stdout.split()
+            assert on_rows == []
     (fc_side, fc), (radio_side, radio) = pads["fc_board"], pads["radio_board"]
     assert (fc_side, radio_side) == ("top", "bottom")  # header up on the FC, socket down on the radio board
     assert len(fc) == 12 and fc == radio  # same XY carries the same net on both boards
