@@ -117,8 +117,12 @@ unquoted symbol text, a missing PWR_FLAG) each fail a test.
 `pcb.py` (run by KiCad's Python) turns each netlist into `out/<board>.kicad_pcb`: 28 mm square, 4 layers, M2 holes
 on a 20 mm square, every footprint with its nets, greedy courtyard placement on a 0.1 mm grid. Fixed: the stack
 header on the left edge between the holes (FC: header on top; radio: socket on the bottom, same pad XY and nets),
-USB-C on the bottom edge. Order: P4, connectors (edge strips), crystal and IMU (top only), then by size; no connector
-under the P4 (it blocked the fanout of a motor pin). A 0.25 mm fanout ring round the P4 courtyard keeps other parts
+USB-C on the bottom edge. Order: P4 with its pin rows facing the crystal, crystal and load caps right beside pins
+99/100 (a few mm of F.Cu; greedy placement put the crystal 13 mm away), connectors (edge strips), IMU (top only), big
+parts (over 8 mm2), 100 nF decoupling caps aimed at the rail pin farthest from the caps already there, then by size.
+The buck-boost inductor gets its TPS63802 right beside it. No connector under the P4 (it blocked the fanout of a motor
+pin), and no small part on the bottom side over the P4's two pin rows, where the fanout vias go (`frame`; a test
+checks it; 13 parts sat there while the frame was computed round the inductor by mistake, and routing left 5-8 nets). A 0.25 mm fanout ring round the P4 courtyard keeps other parts
 (not the edge or the hole keep-outs) away: with the 0201 caps at the normal 0.15 mm, two P4 pins (`M2`, `FLASH_CK`)
 had no room for their escape vias; rings of 0.3-0.35 mm moved the choke point to other pins and 0.4 mm and up no
 longer fit every part. pF/nF caps are 0201: with 0402 the 25.5 mm flight board did not fit (16 caps left over at
@@ -154,8 +158,22 @@ f6f51bb02245e8e717f9359bd260cc9c5c0b1bc0acc8b7cb2cd5b8ffeb5de3c7) to `out/<board
   unconnected; otherwise the next element order is tried.
 - Freerouting is deterministic for a given DSN (six runs, six identical results), but KiCad's DSN exporter orders
   components, images, padstacks and nets by their random UUIDs, so the same board routed clean in one run and left
-  a net in the next. `route.py` sorts the DSN by name before routing (`canonical()`); a retry uses a different
-  repeatable order (nets reversed, components reversed, both), up to four attempts.
+  a net in the next. `route.py` sorts the DSN by name before routing (`canonical()`); other runs use a different
+  repeatable order (nets reversed, components reversed, both, then seeded shuffles).
+- The critical nets (`XTAL_P/N`, `BB_L1/L2`, `HP_SW`) are routed alone first and locked, so the autorouter works round
+  them; KiCad exports them as `fix` wires. Then `ROUTE_RUNS` orders (default 10) run in parallel, `ROUTE_JOBS` at a
+  time, each stopped at `ROUTE_LIMIT` seconds: a pass is single-threaded, so this scales with the core count. Lowest
+  clean order wins. Freerouting's unrouted count is not the gate: up to 2 leftovers still go to KiCad's check, because
+  it can count a GND connection open that the plane and pours close (the pinned FC route: 1 "unrouted", 0 in KiCad).
+- `finish()` deletes a GND stub that is still too close at the floor width (the pours carry GND); DRC reports an open
+  if it was needed.
+- **The routed copper is a source file: `routes/<board>.json`**, every track and via before the pours. Freerouting is
+  deterministic for a DSN on one machine but not across them (the same order gave 1 unrouted on Linux/Java 25 and 5 on
+  macOS/Java 27), so `route.py` applies the pinned copper to the fresh placement and runs the same finish and DRC gate.
+  A netlist or placement change fails the gate and routes afresh, replacing the file only when the new route is clean;
+  delete the file to force a re-route. The FC route took 30 orders on a 32 vCPU RunPod pod:
+  `ROUTE_REMOTE="root@<ip> <port>" ROUTE_JOBS=30 ROUTE_RUNS=30` runs Freerouting there (Java 25+ on PATH, jar in the
+  home directory, SSH key `~/.runpod/ssh/runpodctl-ssh-key`). KiCad itself still runs locally.
 
 Rules are JLCPCB's 4-layer, 1 oz limits (jlcpcb.com/capabilities/pcb-capabilities, read 2026-10-31), written by
 `pcb.py` to `out/<board>.kicad_pro` and `.kicad_dru`: 0.09 mm track and space (routed at 0.1), vias 0.15 mm hole with
@@ -169,13 +187,14 @@ The test's copper set is everything JLCPCB's check would reject: clearance, shor
 clearance, annular ring, track width, via size, drill size, mask bridges, starved thermals, isolated copper, plus zero
 unconnected items.
 
-Result: both boards fully routed at the first attempt and clean against those rules (FC 1460 tracks, 170 vias).
+Result: both boards routed and clean against those rules (FC 1565 tracks, 182 vias; radio 123 tracks, 32 vias).
+Critical lengths on the FC board: XTAL_P 4.3 mm, XTAL_N 6.1 mm, BB_L1 7.3 mm, BB_L2 5.2 mm, HP_SW 13.5 mm.
 Remaining DRC, not fab-related: the FC stack header courtyard overlaps two M2 hole courtyards (header body clears
-an M2 head by ~0.5 mm); the radio board's C5 module courtyard overlaps all four hole courtyards, and two holes sit
-inside the antenna keep-out (`items_not_allowed`).
+an M2 head by ~0.5 mm), the FC crystal courtyard overlaps one, one dangling FC via, and the radio board's C5 module
+courtyard overlaps two hole courtyards. The C5 antenna now hangs over the top edge, so no hole sits in its keep-out.
 Tests: both boards fit, the stack pads line up with the same nets (a wrong bottom-side rotation fails it), and each
-routed board passes the copper DRC with zero unconnected items (skipped without Java or the jar; 14 min for the
-whole file with the DRC-gated routing of both boards).
+routed board passes the copper DRC with zero unconnected items (skipped without Java or the jar; about 2 min for the
+whole file with both routes pinned).
 `make hw-pcb` also renders `out/render/*.png` and plots the power-path transient to `out/power_transient.png`.
 `make hw-gerbers` writes `out/gerbers/<board>.zip` for the JLCPCB order form: Gerber X1 with Protel extensions
 (copper, paste, silk, mask, Edge.Cuts), Excellon PTH and NPTH drills plus a drill map, all on the absolute origin.

@@ -6,18 +6,33 @@ Needs Java 25+ (brew install openjdk) and hardware/tools/freerouting-2.5.0.jar (
 Writes out/<board>-routed.kicad_pcb; the placed board is left as it is.
 """
 import collections
+import concurrent.futures
 import json
+import os
+import random
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
 
 import pcbnew
 
+from pcb import POWER, POWER_WIDTH
+
 HERE = Path(__file__).resolve().parent
 JAVA = "/opt/homebrew/opt/openjdk/bin/java"
 JAR = HERE / "tools/freerouting-2.5.0.jar"
 KICAD_CLI = "/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli"
+# Routed first and locked, so the autorouter works round them: short, sensitive or high-current loops that must not
+# lose out to whichever net got there first (XTAL_N was among the leftovers when routed with the rest).
+CRITICAL = {"XTAL_P", "XTAL_N", "BB_L1", "BB_L2", "HP_SW"}
+# An autorouter pass is single-threaded, so parallel runs scale with the core count.
+JOBS = int(os.environ.get("ROUTE_JOBS", max(1, (os.cpu_count() or 2) - 2)))
+LIMIT = int(os.environ.get("ROUTE_LIMIT", 600))  # seconds per run; slow runs (14 min seen) ended unrouted anyway
+RUNS = int(os.environ.get("ROUTE_RUNS", 10))  # element orders to try
+MAX_LEFT = 2  # Freerouting leftovers still worth KiCad's check, see main()
+REMOTE = os.environ.get("ROUTE_REMOTE")  # "user@host port": run Freerouting there (Java + jar in ~), see DESIGN.md
 
 
 def pour(board, layer, plane):
@@ -112,6 +127,91 @@ def stitch(board, plane):
                   f"{pcbnew.ToMM(bb.GetX()):.1f}, {pcbnew.ToMM(bb.GetY()):.1f} mm (DRC decides)")
 
 
+def stitch_pads(board, plane):
+    """A GND via within 1.2 mm of every SMD GND pad that has none. Freerouting leaves most GND pads to the outer
+    pours, so a decoupling cap's return ran 3-8 mm through the pour to one of 17 GND vias before reaching the In1
+    plane. A spot must lie on connected GND copper on the pad's layer and on In1, clear of every pad, other-net
+    track and hole by the rules (plus margin), and outside rule areas. Refills the pours."""
+    gnd, ref = plane.GetNetCode(), next(t for t in board.GetTracks() if t.GetClass() == "PCB_VIA")
+    drill, r = ref.GetDrillValue(), ref.GetWidth(pcbnew.F_Cu) // 2 + pcbnew.FromMM(0.12)  # via pad + clearance + margin
+    pads = [p for f in board.GetFootprints() for p in f.Pads()]
+    blockers = pads + [t for t in board.GetTracks() if t.GetNetCode() != gnd]  # a via on any pad wicks solder
+    # Minimum centre distance to another hole: JLCPCB 0.45 hole-to-hole and 0.28 hole-to-copper for plated holes,
+    # 0.2 hole-to-hole between vias.
+    holes = [(p.GetPosition(), max(pcbnew.FromMM(0.45) + (p.GetDrillSize().x + drill) // 2,
+                                   pcbnew.FromMM(0.33) + drill // 2 + max(p.GetSize().x, p.GetSize().y) // 2))
+             for p in pads if p.GetDrillSize().x]
+    holes += [(v.GetPosition(), pcbnew.FromMM(0.2) + drill) for v in board.GetTracks() if v.GetClass() == "PCB_VIA"]
+    gnd_pts = [v.GetPosition() for v in board.GetTracks() if v.GetClass() == "PCB_VIA" and v.GetNetCode() == gnd]
+    gnd_pts += [p.GetPosition() for p in pads if p.GetNetCode() == gnd and p.GetDrillSize().x]
+    rule_areas = [z for z in board.Zones() if z.GetIsRuleArea()]
+    seen, islands = clusters(board, gnd)
+    joined = [x for x in islands if x[0] in seen]
+    step, reach = pcbnew.FromMM(0.1), pcbnew.FromMM(1.2)
+    spots = sorted(((dx, dy) for dx in range(-reach, reach + 1, step) for dy in range(-reach, reach + 1, step)),
+                   key=lambda d: d[0] ** 2 + d[1] ** 2)
+    added = 0
+    for pad in pads:
+        if pad.GetNetCode() != gnd or pad.GetDrillSize().x:
+            continue
+        c = pad.GetPosition()
+        if any((c - q).EuclideanNorm() < reach for q in gnd_pts):
+            continue
+        layer = pcbnew.F_Cu if pad.IsOnLayer(pcbnew.F_Cu) else pcbnew.B_Cu
+        near = []
+        for o in blockers:
+            box = o.GetBoundingBox()
+            box.Inflate(reach + r)
+            if box.Contains(c):
+                near.append(o)
+        for dx, dy in spots:
+            p = pcbnew.VECTOR2I(c.x + dx, c.y + dy)
+            if (any(inside(jp, ji, p, r) for _, z, jp, ji in joined if z.GetLayer() == layer)
+                    and any(inside(jp, ji, p, r) for _, z, jp, ji in joined if z.GetLayer() == pcbnew.In1_Cu)
+                    and not any(o.HitTest(p, r) for o in near)
+                    and all((p - h).EuclideanNorm() >= d for h, d in holes)
+                    and not any(z.Outline().Contains(p) for z in rule_areas)):
+                via = pcbnew.PCB_VIA(board)
+                via.SetPosition(p)
+                via.SetNetCode(gnd)
+                via.SetDrill(drill)
+                via.SetWidth(ref.GetWidth(pcbnew.F_Cu))
+                board.Add(via)
+                gnd_pts.append(p)
+                holes.append((p, pcbnew.FromMM(0.2) + drill))
+                added += 1
+                break
+    pcbnew.ZONE_FILLER(board).Fill(board.Zones())
+    print(f"stitch_pads: {added} GND vias added")
+
+
+def widen(board):
+    """Power tracks back towards POWER_WIDTH where the copper round them allows. Freerouting necks a Power net for
+    a whole run when it squeezes past pads (BB_L1, the buck-boost switch node, came back at 0.09 mm for 2.7 mm).
+    Each narrow segment takes the widest step that keeps 0.11 mm from every other-net pad, track and via on its
+    layer (0.13 from plated holes: JLCPCB's 0.28 hole-to-copper) and 0.2 from the edge; the pours refill round it."""
+    power, full = set(POWER), pcbnew.FromMM(POWER_WIDTH)
+    edge = board.GetBoardEdgesBoundingBox()
+    edge.Inflate(-pcbnew.FromMM(0.2))
+    items = [p for f in board.GetFootprints() for p in f.Pads()] + list(board.GetTracks())
+    for t in board.GetTracks():
+        if t.GetClass() != "PCB_TRACK" or t.GetNetname() not in power or t.GetWidth() >= full:
+            continue
+        box = t.GetBoundingBox()
+        box.Inflate(full)
+        near = [o for o in items if o.GetNetCode() != t.GetNetCode() and o.IsOnLayer(t.GetLayer())
+                and o.GetBoundingBox().Intersects(box)]
+        for w in (0.3, 0.25, 0.2, 0.15):
+            if pcbnew.FromMM(w) <= t.GetWidth():
+                break
+            seg = pcbnew.SHAPE_SEGMENT(t.GetStart(), t.GetEnd(), pcbnew.FromMM(w))
+            if edge.Contains(seg.BBox()) and not any(
+                    seg.Collide(o.GetEffectiveShape(t.GetLayer()), pcbnew.FromMM(0.13 if o.GetClass() == "PAD" and o.GetDrillSize().x
+                                                                     else 0.11)) for o in near):
+                t.SetWidth(pcbnew.FromMM(w))
+                break
+
+
 def sexp(text):
     """Parse the DSN into nested lists; tokens keep their quotes."""
     tokens = re.findall(r'"[^"]*"|[()]|[^\s()"]+', text)
@@ -132,12 +232,13 @@ def unsexp(node):
     return "(" + " ".join(unsexp(c) if isinstance(c, list) else c for c in node) + ")" if isinstance(node, list) else node
 
 
-def canonical(text, variant=0):
+def canonical(text, variant=0, keep=None):
     """KiCad's DSN exporter orders components, images, padstacks and nets by their random UUIDs, so the same board
     routes differently from run to run (Freerouting itself is deterministic per DSN: six runs, six identical
     results). Sort everything by name; `variant` reverses nets (1), components (2) or both (3) for a different but
     repeatable routing order on a retry. Through-hole padstacks ([A]) grow by 0.16 mm for the router only: JLCPCB
-    wants 0.28 mm from a plated hole to copper and the 1.0 mm header pads have a 0.175 mm ring."""
+    wants 0.28 mm from a plated hole to copper and the 1.0 mm header pads have a 0.175 mm ring. With `keep`, only
+    those nets stay connected; the pads of the others remain as obstacles."""
     mark = "<<quote>>"
     pcb = sexp(text.replace('(string_quote ")', f"(string_quote {mark})"))
     pcb[1] = "board.dsn"  # the path KiCad put here differs between the Makefile and the tests
@@ -157,6 +258,8 @@ def canonical(text, variant=0):
         if head in ("placement", "library", "network"):
             section[1:] = sorted(section[1:], key=lambda n: (str(n[0]), name(n)) if isinstance(n, list) else ("", str(n)),
                                  reverse=head == "network" and variant in (1, 3))
+            if variant >= 4 and head != "library":  # retries past the four orders: a seeded, repeatable shuffle
+                section[1:] = sorted(section[1:], key=lambda n: random.Random(f"{variant}:{name(n)}").random())
         if head == "placement":
             for comp in section[1:]:
                 comp[2:] = sorted(comp[2:], key=name, reverse=variant in (2, 3))
@@ -165,7 +268,7 @@ def canonical(text, variant=0):
                 if net[0] == "net":
                     for pins in net[2:]:
                         if isinstance(pins, list) and pins[0] == "pins":
-                            pins[1:] = sorted(pins[1:])
+                            pins[1:] = sorted(pins[1:]) if keep is None or net[1].strip('"') in keep else []
                 elif net[0] == "class":
                     nets = [c for c in net[2:] if not isinstance(c, list)]
                     rest = [c for c in net[2:] if isinstance(c, list)]
@@ -173,10 +276,30 @@ def canonical(text, variant=0):
     return unsexp(pcb).replace(mark, '"')
 
 
-def main(pcb, passes):
-    pcb = Path(pcb)
-    dsn, ses, out = pcb.with_suffix(".dsn"), pcb.with_suffix(".ses"), pcb.with_name(f"{pcb.stem}-routed.kicad_pcb")
-    board = pcbnew.LoadBoard(str(pcb))
+def freeroute(dsn, ses, passes):
+    """One Freerouting run, here or on REMOTE. Returns (unrouted count, None if it hit LIMIT or gave no count; log)."""
+    args = ["-de", dsn.name, "-do", ses.name, f"--router.autorouter.max_passes={passes}", "--router.neck_width_um=90",
+            "--gui.enabled=false", "--usage_and_diagnostic_data.disable_analytics=true"]
+    if REMOTE:
+        host, port = REMOTE.split()
+        opts = ["-i", str(Path.home() / ".runpod/ssh/runpodctl-ssh-key"), "-o", "StrictHostKeyChecking=accept-new"]
+        subprocess.run(["scp", "-q", *opts, "-P", port, str(dsn), f"{host}:"], check=True)
+        cmd = ["ssh", *opts, "-p", port, host, f"timeout {LIMIT} java -jar {JAR.name} " + shlex.join(args)]
+    else:
+        cmd = [JAVA, "-jar", str(JAR), *args]
+    try:
+        run = subprocess.run(cmd, cwd=dsn.parent, capture_output=True, text=True, timeout=LIMIT + 30)
+    except subprocess.TimeoutExpired:
+        return None, f"{dsn.name}: over {LIMIT} s"
+    log = run.stdout + run.stderr
+    left = re.search(r"Auto-routing stage completed.*?\((\d+) unrouted", log)
+    if REMOTE and left:
+        subprocess.run(["scp", "-q", *opts, "-P", port, f"{host}:{ses.name}", str(ses)], check=True)
+    return (int(left[1]) if left else None), log
+
+
+def export(board, dsn):
+    """Specctra DSN of `board`, Freerouting's plane and spacing margins applied (the board is not saved after this)."""
     plane = next(z for z in board.Zones() if z.GetNetname() == "GND")  # In1: Freerouting fans GND pads out to it
     plane.UnFill()
     plane.SetLocalClearance(pcbnew.FromMM(0.2))  # ponytail: empirical; at 0.1 the router left 2 FC nets unrouted
@@ -188,29 +311,116 @@ def main(pcb, passes):
     # unrouted on the FC board.
     # Typed clearances such as `(clearance 115 (type wire_via))` are accepted but leave dozens of FC nets unrouted,
     # and so did 0.115 for the Power class alone; finish() narrows tracks instead where the margin is missing.
-    exported = dsn.read_text().replace("(clearance 90)", "(clearance 100)")
-    # Each attempt is a different but repeatable element order (see canonical()); an attempt counts only when the
-    # finished board passes KiCad's copper DRC (the router's octagons can leave a hole clearance a few um short).
-    for attempt in range(4):
-        dsn.write_text(canonical(exported, attempt))
-        run = subprocess.run([JAVA, "-jar", str(JAR), "-de", str(dsn), "-do", str(ses),
-                              f"--router.autorouter.max_passes={passes}", "--router.neck_width_um=90",
-                              "--gui.enabled=false", "--usage_and_diagnostic_data.disable_analytics=true"],
-                             capture_output=True, text=True, check=True)
-        print(run.stdout, run.stderr)
-        left = re.search(r"Auto-routing stage completed.*?\((\d+) unrouted", run.stdout + run.stderr)
-        if not left or left[1] != "0":
-            print(f"attempt {attempt + 1}: {left[1] if left else '?'} unrouted")
+    return dsn.read_text().replace("(clearance 90)", "(clearance 100)")
+
+
+def preroute(pcb, dsn, ses, passes):
+    """Route CRITICAL alone, lock it and save <board>-pre.kicad_pcb, which the full runs start from. Boards without
+    those nets (the radio) get the placed board unchanged."""
+    board = pcbnew.LoadBoard(str(pcb))
+    pre = pcb.with_name(f"{pcb.stem}-pre.kicad_pcb")
+    if CRITICAL & {n.GetNetname() for n in board.GetNetInfo().NetsByName().values()}:
+        dsn.write_text(canonical(export(pcbnew.LoadBoard(str(pcb)), dsn), keep=CRITICAL))
+        left, log = freeroute(dsn, ses, passes)
+        print(log)
+        if left != 0:
+            sys.exit(f"critical nets: {left} unrouted")
+        if not pcbnew.ImportSpecctraSES(board, str(ses)):
+            sys.exit("SES import failed")
+        for t in board.GetTracks():
+            t.SetLocked(True)
+        print("preroute: " + ", ".join(f"{n} {pcbnew.ToMM(sum(t.GetLength() for t in board.GetTracks() if t.GetNetname() == n)):.1f} mm"
+                                       for n in sorted(CRITICAL)))
+    pcbnew.SaveBoard(str(pre), board)
+    for ext in (".kicad_pro", ".kicad_dru"):  # without the .kicad_dru the pours fill to the wrong hole clearance
+        pre.with_suffix(ext).write_text(pcb.with_suffix(ext).read_text())
+    return pre
+
+
+def save_route(board, path):
+    """Every track and via as one JSON row per line, duplicates dropped: the routed copper as a source file."""
+    rows = {}
+    for t in board.GetTracks():
+        if t.GetClass() == "PCB_VIA":
+            p = t.GetPosition()
+            row = ["V", t.GetNetname(), p.x, p.y, t.GetWidth(pcbnew.F_Cu), t.GetDrillValue()]
+        else:
+            a, b = t.GetStart(), t.GetEnd()
+            row = ["T", t.GetNetname(), board.GetLayerName(t.GetLayer()), a.x, a.y, b.x, b.y, t.GetWidth()]
+        rows[json.dumps(row)] = None
+    path.parent.mkdir(exist_ok=True)
+    path.write_text("[\n" + ",\n".join(sorted(rows)) + "\n]\n")
+
+
+def load_route(board, path):
+    """Add save_route()'s copper to a placed board."""
+    for kind, net, *r in json.loads(path.read_text()):
+        if board.FindNet(net) is None:
+            sys.exit(f"{path.name}: net {net} is not on the board")
+        if kind == "V":
+            item = pcbnew.PCB_VIA(board)
+            item.SetPosition(pcbnew.VECTOR2I(r[0], r[1]))
+            item.SetWidth(r[2])
+            item.SetDrill(r[3])
+        else:
+            item = pcbnew.PCB_TRACK(board)
+            item.SetLayer(board.GetLayerID(r[0]))
+            item.SetStart(pcbnew.VECTOR2I(r[1], r[2]))
+            item.SetEnd(pcbnew.VECTOR2I(r[3], r[4]))
+            item.SetWidth(r[5])
+        item.SetNet(board.FindNet(net))
+        board.Add(item)
+
+
+def clean(report):
+    bad = [v for v in report["violations"] if v["type"] in COPPER]
+    print(f"{len(bad)} copper DRC errors, {len(report['unconnected_items'])} unconnected")
+    print("\n".join(f"{v['description']} at {v['items'][0]['pos']}" for v in bad))
+    return not bad and not report["unconnected_items"]
+
+
+def main(pcb, passes):
+    pcb = Path(pcb)
+    dsn, ses, out = pcb.with_suffix(".dsn"), pcb.with_suffix(".ses"), pcb.with_name(f"{pcb.stem}-routed.kicad_pcb")
+    # Freerouting's result changes with the JVM and CPU (order 9 of the FC board: 1 unrouted on Linux/Java 25, 5 on
+    # macOS/Java 27), so a clean route is kept in routes/ and only the DRC gate below decides whether it still fits.
+    # A netlist or placement change fails that gate and routes afresh. Delete the file to force a re-route.
+    pin = HERE / "routes" / f"{pcb.stem}.json"
+    if pin.exists():
+        board = pcbnew.LoadBoard(str(pcb))
+        load_route(board, pin)
+        if clean(finish(board, out, pcb)):
+            return
+        print(f"{pin.name} no longer fits, routing afresh")
+    pre = preroute(pcb, dsn, ses, passes)
+    exported = export(pcbnew.LoadBoard(str(pre)), dsn)
+    # Each run is a different but repeatable element order (see canonical()). The lowest clean order wins, so the
+    # result does not depend on which job finished first; a run counts only when the finished board passes KiCad's
+    # copper DRC (the router's octagons can leave a hole clearance a few um short).
+    def attempt(variant):
+        d, s = pcb.with_name(f"{pcb.stem}-{variant}.dsn"), pcb.with_name(f"{pcb.stem}-{variant}.ses")
+        d.write_text(canonical(exported, variant))
+        left, log = freeroute(d, s, passes)
+        print(f"order {variant}: {'over the limit' if left is None else f'{left} unrouted'}", flush=True)
+        return variant, left, s, log
+    with concurrent.futures.ThreadPoolExecutor(JOBS) as pool:
+        runs = list(pool.map(attempt, range(RUNS)))
+    for variant, left, s, log in runs:
+        # Freerouting's count is not the gate: it can report a GND connection open that the In1 plane and the pours
+        # added in finish() close (order 9 of the FC board: 1 "unrouted", 0 unconnected in KiCad). KiCad's DRC decides.
+        if left is None or left > MAX_LEFT:
             continue
-        report = finish(pcbnew.LoadBoard(str(pcb)), ses, out, pcb)  # a fresh copy: the plane at its fill clearance
-        bad = [v["description"] for v in report["violations"] if v["type"] in COPPER]
-        print(f"attempt {attempt + 1}: routed, {len(bad)} copper DRC errors, {len(report['unconnected_items'])} unconnected")
-        if not bad and not report["unconnected_items"]:
-            break
-        print("\n".join(f"{d} at {v['items'][0]['pos']}" for v, d in
-                        ((v, v["description"]) for v in report["violations"] if v["type"] in COPPER)))
-    else:
-        sys.exit("Freerouting gave no clean board in 4 runs")
+        print(log)
+        board = pcbnew.LoadBoard(str(pre))  # a fresh copy: the plane at its fill clearance
+        if not pcbnew.ImportSpecctraSES(board, str(s)):
+            sys.exit("SES import failed")
+        save_route(board, pin.with_suffix(".tmp"))
+        print(f"order {variant}: routed, ", end="")
+        if clean(finish(board, out, pcb)):
+            pin.with_suffix(".tmp").replace(pin)
+            return
+    pin.with_suffix(".tmp").unlink(missing_ok=True)
+    sys.exit(f"Freerouting gave no clean board in {RUNS} runs")
 
 
 # Everything JLCPCB's check would reject (test_boards.py checks the same set).
@@ -218,10 +428,8 @@ COPPER = {"clearance", "shorting_items", "hole_clearance", "hole_to_hole", "copp
           "track_width", "via_diameter", "drill_too_small", "solder_mask_bridge", "starved_thermal", "isolated_copper"}
 
 
-def finish(board, ses, out, pcb):
-    """Import the routed session, add the pours and stitch vias, widen the necks; save `out` and return its DRC."""
-    if not pcbnew.ImportSpecctraSES(board, str(ses)):
-        sys.exit("SES import failed")
+def finish(board, out, pcb):
+    """Add the pours and stitch vias to the routed board, widen the necks; save `out` and return its DRC."""
     plane = next(z for z in board.Zones() if z.GetNetname() == "GND")
     # Freerouting takes the DSN plane for solid copper, but the via field and the signal tracks on In1 cut the
     # real fill into pieces, so GND stubs it counted as "on the plane" end up on nothing. GND pours on the outer
@@ -235,33 +443,49 @@ def finish(board, ses, out, pcb):
         if t.GetWidth() < pcbnew.FromMM(0.1):  # incl. the router's 0.09 retries
             necked.add(uuid)
             t.SetWidth(pcbnew.FromMM(0.09))
+    widen(board)
     pcbnew.ZONE_FILLER(board).Fill(board.Zones())
     stitch(board, plane)
+    stitch_pads(board, plane)
     pcbnew.SaveBoard(str(out), board)
     for ext in (".kicad_pro", ".kicad_dru"):  # same rules
         out.with_suffix(ext).write_text(pcb.with_suffix(ext).read_text())
     # KiCad's own DRC narrows a track wherever it is a few um too close: the widened necks (back towards JLCPCB's
     # 3 mil, 0.076 mm, allowed in BGA fan-outs) and the router's octagonal corners next to a hole (0.09 floor).
     drc = out.with_suffix(".drc.json")
-    for _ in range(6):
+    u1 = next(f for f in board.GetFootprints() if f.GetReference() == "U1").GetCourtyard(pcbnew.F_Cu).BBox()
+    for _ in range(12):  # the re-widened Power tracks can take a few rounds between fine-pitch pads
         subprocess.run([KICAD_CLI, "pcb", "drc", "--format", "json", "-o", str(drc), str(out)], capture_output=True)
         report = json.loads(drc.read_text())
-        fixed = False
+        fixed, drop = False, set()
         for v in report["violations"]:
             short = re.search(r"clearance ([\d.]+) mm; actual ([\d.]+) mm", v["description"])
-            if v["type"] not in ("clearance", "hole_clearance") or not short:
+            if v["type"] not in ("clearance", "hole_clearance", "copper_edge_clearance") or not short:
                 continue
             for item in v["items"]:
                 t = tracks.get(item["uuid"])
                 if t is None:
                     continue
-                floor = pcbnew.FromMM(0.076 if item["uuid"] in necked else 0.09)
+                fanout = u1.Contains(t.GetStart()) and u1.Contains(t.GetEnd())  # the 0.076 rule holds inside U1 only
+                floor = pcbnew.FromMM(0.076 if item["uuid"] in necked and fanout else 0.09)
                 width = max(floor, t.GetWidth() - 2 * pcbnew.FromMM(float(short[1]) - float(short[2])) - 1000)
                 if width < t.GetWidth():
                     t.SetWidth(width)
                     fixed = True
-        if not fixed:
+                elif t.GetNetname() == "GND" and not t.IsLocked():
+                    # At the floor and still too close: the pours carry GND now, and the next DRC round reports an
+                    # open if this stub was really needed.
+                    drop.add(item["uuid"])
+        if not fixed and not drop:
             break
+        if drop:  # edited in the file: board.Remove() crashed pcbnew's Python on the next GetTracks()
+            pcbnew.SaveBoard(str(out), board)
+            text = out.read_text()
+            for uuid in drop:
+                text = re.sub(rf'\(segment\b(?:(?!\(segment\b).)*?\(uuid "{uuid}"\)\s*\)\s*', "", text, count=1, flags=re.S)
+            out.write_text(text)
+            board = pcbnew.LoadBoard(str(out))
+            tracks = {t.m_Uuid.AsString(): t for t in board.GetTracks() if t.GetClass() == "PCB_TRACK"}
         pcbnew.ZONE_FILLER(board).Fill(board.Zones())
         pcbnew.SaveBoard(str(out), board)
     print(f"{out.name}: {len(tracks)} tracks, {sum(t.GetClass() == 'PCB_VIA' for t in board.GetTracks())} vias, "
