@@ -1,12 +1,5 @@
 # Resilient landing without camera
 
-## Method and delegation limit
-
-Three independent free-model research launches were attempted (Flint, Nemotron and Beam).
-All were rejected by the configured provider's free-usage limit. No subscription or paid
-model fallback was used. The findings below are direct source inspection and experiments
-in the current session, not an independent multi-agent consensus.
-
 ## Reproduced causes
 
 Baseline: commit ea631d4, `SitlDrone(seed=9, profile="whoop2_4k", safe_landing=True)`,

@@ -3,6 +3,10 @@
 Dual-chip **ESP32-P4 + ESP32-C5** flight controller and firmware for indoor autonomous swarm research.
 Derived from [Espressif ESP-Drone](https://github.com/espressif/esp-drone) (Crazyflie-based), GPL-3.0.
 
+> **Simulation only. No board has been built and nothing has flown.** The firmware has never run on this
+> hardware and the autorouted boards have had no human review. Do not order the boards or fly this firmware
+> expecting it to work or be safe. Contributions and review are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).
+
 The full plan, gap analysis and gates are in [`docs/ESP-FC-Next_Project_Plan.pdf`](docs/ESP-FC-Next_Project_Plan.pdf).
 
 **Current status:** 1/4 kHz host/SITL variants, trajectory feedforward, and an optional RPM notch
@@ -29,7 +33,7 @@ No downwash model; low battery is a voltage step, not a discharge model.
 Two 28 mm square boards as code (`hardware/boards.py`, SKiDL): the P4 flight controller and the C5-MINI-1
 radio board, stacked on a 1.27 mm 1x12 header, 1S only. `make hw` passes 22 checks (ERC, drawn-vs-code
 netlist, pin-to-pad, firmware pin defaults, ngspice power path, placement fit, routed copper DRC). Both boards
-place and autoroute with Freerouting (`make hw-pcb`) and pass KiCad DRC against **JLCPCB's 4-layer 1 oz
+place and autoroute with Freerouting (`make hw-pcb`; the clean routes are kept in `hardware/routes/`) and pass KiCad DRC against **JLCPCB's 4-layer 1 oz
 rules** (0.09 mm track/space, 0.35/0.15 mm vias, 0.2 mm copper-to-edge, 0.1 mm mask dam, through-hole
 0.28 mm hole-to-copper). Details and sources: [`hardware/DESIGN.md`](hardware/DESIGN.md).
 
@@ -62,11 +66,11 @@ Not ordered yet. Decisions left for the order form:
 - Check D1, C2 and the ICs' pin 1 rotations in JLCPCB's placement preview.
 - JLCPCB's DFM check on upload is the final word on the footprints.
 
-Known DRC leftovers, not fab-related: the FC stack header courtyard overlaps the H1/H2 hole courtyards; the
-radio board's H1/H3 holes sit inside the C5 antenna keep-out. The autorouted copper has not been reviewed by
+Known DRC leftovers, not fab-related: the FC stack header courtyard overlaps the H1/H2 hole courtyards and the
+crystal courtyard overlaps H3; the C5 module courtyard overlaps the radio board's H1/H3 hole courtyards. The autorouted copper has not been reviewed by
 a human (return paths, 40 MHz crystal, USB D+/D-, battery path width). No 3D models for the P4 or C5; the
 ESPFC footprints have not been checked against a physical part. ICM-42688-P Rev 1.8 datasheet still
-unreadable (TDK returns 403). Phase 2 kit (user's AliExpress cart) not bought.
+unreadable (TDK returns 403). Phase 2 kit not bought.
 
 ## Layout
 
@@ -88,6 +92,9 @@ colima start --cpu 6 --memory 8 --disk 60 --vm-type vz
 docker pull espressif/idf:release-v5.5
 make sim-setup
 ```
+
+Keep the checkout under `$HOME`: Colima mounts only that by default, and elsewhere the Docker builds fail with
+`CMakeLists.txt not found` or a missing `build/mbedtls`.
 
 ## Common commands
 
