@@ -36,7 +36,7 @@ The full plan, gap analysis and gates are in [`docs/ESP-FC-Next_Project_Plan.pdf
 | **Four-drone swarm in SITL** | `make swarm` flies four firmware copies in lockstep through link loss, camera dropout and low battery. All land. |
 | **Failsafe landing** | Opt-in latched hold-and-land supervisor. Renewed commands cannot cancel LAND. |
 | **Encrypted radio link** | P4 to C5 over SPI, Crazyflie CRTP inside an AES-CCM envelope, fuzzed with libFuzzer. cflib driver included. |
-| **Hardware as code** | Both boards written in SKiDL, checked by 22 tests, routed against JLCPCB's 4-layer rules. |
+| **Hardware as code** | Both boards written in SKiDL, checked by 37 tests, routed against JLCPCB's 4-layer rules, simulated in ngspice with the routed copper. |
 
 <div align="center">
 <img src="docs/img/swarm-sitl.gif" width="70%" alt="Four simulated drones take off, form a square and swap corners; one loses its radio link and lands by itself">
@@ -67,7 +67,7 @@ Nothing is bought or flown until gates G1 to G6 pass, in order.
 | **G1** Math model | Rigid-body model, loop margins, sensor noise, Monte Carlo | Pass ([report](sim/reports/g1/README.md)) |
 | **G2** Software in the loop | Real flight C code flying the model; four-drone swarm | Hover pass; swarm 7/7 scenarios ([report](sim/reports/swarm/README.md)) |
 | **G3** Code quality | Warnings as errors, cppcheck, clang-tidy, sanitizers, fuzzing, review checklist | Met on host |
-| **G4** PCB | ERC/DRC, netlist checks, power-stage simulation, DFM | In progress: 22 checks pass, no human review yet |
+| **G4** PCB | ERC/DRC, netlist checks, power-stage simulation, DFM | In progress: 32 checks pass, 5 known failures (battery-path copper, SPI link termination), no human review yet |
 | **G5** Hardware in the loop | Real P4 with simulated sensors, motors off | Not started |
 | **G6** Flight | Props off, tethered, single hover, 2 drones, 4 drones | Not started |
 
@@ -126,6 +126,7 @@ make viewer      # 3D replay in the browser
 | Command | What it does |
 | --- | --- |
 | `make flight` | Build P4 flight firmware (`FLIGHT_TARGET=esp32s3` for the old reference board) |
+| `make flight-qemu` | Boot the ESP32-S3 flight image in QEMU and check the UART log (no P4/C5 machine, radio or sensors in QEMU) |
 | `make radio` | Build C5 radio firmware |
 | `make core-test` | Build flight algorithms on the PC with ASan/UBSan and run tests |
 | `make core-coverage` | Test coverage report (`build/coverage/index.html`) |
@@ -148,8 +149,10 @@ make viewer      # 3D replay in the browser
 ## Hardware
 
 Two 28 mm square boards as code (`hardware/boards.py`, SKiDL): the P4 flight controller and the C5-MINI-1 radio
-board, stacked on a 1.27 mm 1x12 header, 1S only. `make hw` passes 22 checks (ERC, drawn-vs-code netlist,
-pin-to-pad, firmware pin defaults, ngspice power path, placement fit, routed copper DRC). Both boards place and
+board, stacked on a 1.27 mm 1x12 header, 1S only. `make hw` runs 37 checks (ERC, drawn-vs-code netlist,
+pin-to-pad, firmware pin defaults, placement fit, routed copper DRC, and ngspice runs of the power path, the 3.3 V
+rail and the SPI link with the resistance and inductance of the routed tracks). 32 pass; 5 are known failures
+kept as expected-fail tests: the battery-path tracks are too thin (166 mOhm) and the SPI link needs series resistors. Both boards place and
 autoroute with Freerouting (`make hw-pcb`; the clean routes are kept in `hardware/routes/`) and pass KiCad DRC
 against **JLCPCB's 4-layer 1 oz rules** (0.09 mm track/space, 0.35/0.15 mm vias, 0.2 mm copper-to-edge, 0.1 mm
 mask dam, through-hole 0.28 mm hole-to-copper). Details and sources: [`hardware/DESIGN.md`](hardware/DESIGN.md).

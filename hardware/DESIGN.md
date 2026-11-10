@@ -100,6 +100,39 @@ flow module (PMW3901 + VL53L1X) ~40 mA = **~0.87 A**. Regulator rating 2 A.
 The FC battery path must stay <= 50 mOhm in total: max pack resistance at 3.5 V and 16 A is then 54 mOhm. A worn or
 small pack sags below this regardless of the FC: the 3.3 V/cell low-battery failsafe has to land before it gets there.
 
+## Routed copper in the simulations (`parasitics.py`, `link_si.py`)
+`parasitics.py` (KiCad Python, run by `make hw-pcb`) turns each net's routed tracks into a resistor network and
+solves it between pads: resistance at 60 C, inductance over the adjacent GND pour, length. Stackup JLC04161H-7628
+(1 oz outer, 0.5 oz inner, 0.2104 mm prepreg, Dk 4.4). Results are pinned in `routes/parasitics.json` beside the
+copper they describe. Not modelled: GND return, pad current crowding, skin effect, mutual inductance.
+
+| Path | Resistance | Inductance | Length |
+| --- | --- | --- | --- |
+| VBAT: ESC connector -> shunt | 60.9 mOhm | 6.3 nH | 20.2 mm |
+| VBAT_SHUNT: shunt -> P-FET | 47.7 mOhm | 4.3 nH | 13.5 mm |
+| VSYS: P-FET -> TPS63802 VIN | 57.8 mOhm | 4.8 nH | 15.5 mm |
+| 3V3: TPS63802 -> stack header | 170.5 mOhm | 16.2 nH | 49.7 mm |
+| 3V3 on the radio board: header -> C5 | 11.0 mOhm | 1.8 nH | 5.8 mm |
+| SPI link, both boards (longest: MOSI) | 0.57 Ohm | 26 nH | 53.7 mm |
+
+Three results (`python power_sim.py`, `python link_si.py`):
+
+1. **Battery path fails with the routed copper.** The tracks add 166 mOhm to the 40 mOhm of shunt + FET; the budget
+   above is 50 mOhm in total. Same case as the table (3.5 V, 50 mOhm pack, 16 A step): VSYS min **2.03 V**, below
+   the 2.3 V limit. The 0.3 mm tracks, a third of them on 0.5 oz inner layers, have to become pours or short wide
+   tracks (about 10 mOhm in total). Test: `test_power_path_holds_with_the_routed_copper` (expected failure).
+2. **3.3 V rail holds during a C5 TX burst.** 5 GHz TX peak 408 mA from 110 mA RX in 2 us (C5 datasheet v1.5
+   Table 5-8), P4 side 0.45 A, converter at the -1 % feedback limit, 22 uF MLCCs derated to 9 uF at 3.3 V bias,
+   30 mOhm per header contact: C5 pin min **3.155 V**, 3.191 V settled; P4 min 3.239 V; both need 3.0 V. The
+   converter is a behavioural model (PI current source with one lag) fitted to the TPS63802 load step of datasheet
+   Fig. 10-25 (-190 mV; model -187 mV). The 0.09 mm neck in the 3V3 track is most of the 170 mOhm.
+3. **SPI link overshoots as routed.** The 0.1 mm tracks are about 86 ohm; a pad at the default 20 mA strength
+   (about 33 ohm) with a 1 ns edge puts **4.3 V / -1.0 V** on the receiver (limits VDD + 0.3 V / -0.3 V). Ring-back
+   stays outside the threshold band at that edge, so data would likely pass, but the pins are overstressed. With
+   51 ohm in series at each driver (SCLK, MOSI, CS at the P4, MISO at the C5) it is clean for 1 ns and 0.3 ns
+   edges: max 3.40 V, min -0.10 V. Add the four resistors. Espressif publishes no IBIS models: the edge time
+   and pad resistance are assumptions (`link_si.py` constants), and real pads have clamp diodes the model lacks.
+
 ## Verification (`make hw`)
 `boards.py` writes `out/fc_board.net` and `out/radio_board.net` (stable tags, so KiCad keeps placement across
 regenerations) and draws `out/<board>/<board>.kicad_sch`. The sheets are auto-placed with net labels and no wires:
@@ -107,7 +140,8 @@ schematizer's routed mode shorted GND into eight other nets on the flight board,
 caught. PWR_FLAGs are added only to the sheets. `test_boards.py`: SKiDL ERC clean on both boards; P4 rails and per-pin decoupling; core-buck
 feedback populated (499 k / 499 k / 22 pF, 1.2 V) and wired to FB_DCDC/EN_DCDC; 3.3 V divider; straps, CHIP_PU RC,
 FLASH_CS pull-up; IMU on SPI2 IO MUX; firmware Kconfig pin defaults equal the board nets on both chips; stack
-connector identical on both boards with the UART crossed; C5 link off strapping pins; power path vs ngspice; every
+connector identical on both boards with the UART crossed; C5 link off strapping pins; power path vs ngspice, with
+and without the routed copper; 3.3 V rail at the C5 during a TX burst; SPI link overshoot and ring-back; every
 symbol pin has a pad in an existing footprint; ICM footprint orientation; ESPFC library regenerated; each drawn
 sheet loads in KiCad, passes KiCad's ERC and exports a netlist identical in connectivity to SKiDL's. Mutations
 (FB resistor, GPIO36 pull-up, shunt value, C5 pin, FB_DCDC wire, wrong footprint, missing footprint, routed sheets,
@@ -236,4 +270,8 @@ land pattern) and Murata DFE201610E-2R2M.
   impedance-controlled), current capacity of the 3V3/VSYS/VBAT tracks (all 0.1 mm now; the battery path needs real
   copper width or pours), via-in-pad, assembly (0201 with solid GND connections).
 - 3D models for the P4 and C5 (pads only in the renders).
-- Not simulated: converter loop stability, C5 TX burst transients on 3V3, layout parasitics.
+- Battery-path copper (166 mOhm, budget about 10) and the four 51 ohm SPI series resistors: see "Routed copper in
+  the simulations". Both need a board change and a re-route.
+- Not simulated: converter loop stability. TI's unencrypted PSpice model (SLVMCX1) loads in ngspice-47 but the
+  converter never starts (singular matrix in its off-timer); run it in PSpice for TI before ordering. Also not
+  simulated: the antenna, EMI, and anything on the GND return.

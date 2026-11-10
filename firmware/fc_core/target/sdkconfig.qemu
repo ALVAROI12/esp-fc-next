@@ -1,0 +1,4 @@
+# ESP-FC Next: overlay for the QEMU boot check (make flight-qemu). QEMU's esp32s3 machine does not emulate the
+# USB-Serial-JTAG PHY PLL; with the USB-Serial-JTAG driver in the image, start-up waits for its calibration for ever.
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+CONFIG_USJ_ENABLE_USB_SERIAL_JTAG=n
