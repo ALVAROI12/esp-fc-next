@@ -1,0 +1,3 @@
+# ESP-FC Next: overlay for the QEMU boot check (make flight-qemu). QEMU's esp32s3 machine does not emulate the
+# USB-Serial-JTAG PHY PLL; with the secondary console on, start-up waits for its calibration for ever.
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y

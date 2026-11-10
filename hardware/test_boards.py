@@ -8,6 +8,7 @@ from pathlib import Path
 
 import boards
 import library
+import link_si
 import power_sim
 import pytest
 from skidl.logger import erc_logger
@@ -170,6 +171,39 @@ def test_power_path_holds_the_3v3_converter_input_during_a_motor_spike():
     assert {p.num: p.net.name for p in q.pins} == {"1": "VBAT_SHUNT", "2": "VBAT_SHUNT", "3": "VBUS", "4": "VSYS",
                                                    "5": "VBAT_SHUNT", "6": "VBAT_SHUNT", "7": "VBAT_SHUNT",
                                                    "8": "VSYS"}
+
+
+@pytest.mark.xfail(strict=True, reason="routed battery path is 166 mOhm of 0.3 mm track; needs pours (DESIGN.md)")
+def test_power_path_holds_with_the_routed_copper():
+    # Same case with the track resistance parasitics.py extracted from the routed board (routes/parasitics.json).
+    vsys, _ = power_sim.simulate(ocv=3.5, rint=0.05, i_motor=16.0, r_copper=power_sim.battery_copper())
+    assert vsys >= power_sim.VIN_FULL_LOAD
+
+
+def test_3v3_converter_model_reproduces_the_datasheet_load_step():
+    # TPS63802 SLVSEU9D Fig. 10-25: 100 mA -> 1 A at VIN 3.3 V undershoots 190 mV with one 22 uF.
+    assert power_sim.datasheet_step() == pytest.approx(-0.190, rel=0.15)
+
+
+def test_3v3_rail_holds_at_both_chips_during_a_c5_tx_burst():
+    # 5 GHz TX peak 408 mA through the routed 3V3 track and the stack header; both chips need >= 3.0 V.
+    rail = power_sim.rail_3v3()
+    assert rail["c5_min"] >= 3.0 and rail["p4_min"] >= 3.0
+    assert rail["c5_settled"] >= 3.0 + 0.1  # DC drop alone leaves 100 mV
+
+
+@pytest.mark.xfail(strict=True, reason="86 ohm tracks driven at the default 20 mA strength overshoot the pin limit")
+@pytest.mark.parametrize("signal", link_si.SIGNALS)
+def test_spi_link_edges_stay_inside_the_pin_limits_as_routed(signal):
+    assert link_si.passes(link_si.check(signal))
+
+
+@pytest.mark.parametrize("signal", link_si.SIGNALS)
+@pytest.mark.parametrize("edge", (1e-9, 0.3e-9))
+def test_spi_link_is_clean_with_51_ohm_series_termination(signal, edge):
+    # The fix to make: 51 ohm at each driver (33 + 51 = track impedance). Holds for a slow and a fast pad edge.
+    result = link_si.check(signal, edge=edge, r_driver=link_si.R_DRIVER + 51)
+    assert link_si.passes(result) and result["delay_ns"] < 0.1 * 0.5e9 / link_si.SPI_HZ
 
 
 def test_espfc_symbol_library_is_regenerated():

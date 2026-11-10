@@ -16,6 +16,7 @@ Dual-chip ESP32-P4 (flight) + ESP32-C5 (radio) flight controller. Plan: `docs/ES
 - License: GPL-3.0; keep upstream copyright headers.
 
 ## Commands
+- `make flight-qemu` - boots the ESP32-S3 flight image in Espressif's QEMU (in the IDF container) and fails on a panic or if app_main is not reached; QEMU has no P4/C5 machine, radio or sensors, so the log ends at Wi-Fi PHY calibration
 - `make flight` / `make radio` - firmware builds; `make flight-fcstep FLIGHT_TARGET=esp32s3` - image with fc_step in the stabilizer task (CONFIG_ESPFC_FC_STEP); `make flight-c5link` - P4 image with CRTP over the C5 SPI link
 - `make core-test` - host build of fc_core with ASan/UBSan + Unity tests (sources used in place from the subtree; see `docs/fc_core.md`); first run copies mbedtls out of the IDF image (`make mbedtls-src`, needs Docker)
 - `make core-lint` / `make core-tidy` - cppcheck / clang-tidy of fc_core (G3); `make link-fuzz [FUZZ_TARGET=fuzz_link_aead]` - libFuzzer on the link codec or AES-CCM envelope (docs/protocols.md)
@@ -23,7 +24,7 @@ Dual-chip ESP32-P4 (flight) + ESP32-C5 (radio) flight controller. Plan: `docs/ES
 - `make sim-setup` / `make sim-test` - Python sim environment (uv, Python 3.12) and tests
 - `make swarm` - four-drone SITL missions with injected faults (Task 1.8)
 - `make hw-setup` / `make hw` - Phase 3 boards as code (`hardware/boards.py`, SKiDL; needs KiCad + ngspice): netlists, drawn KiCad sheets and G4 netlist/footprint/ERC/power checks, see `hardware/DESIGN.md`
-- `make hw-pcb` - PCB placement + routing of both boards (KiCad Python; the clean copper is pinned in `hardware/routes/*.json`, re-routed with Freerouting only if it stops passing DRC: Java 25+, jar per `hardware/DESIGN.md`, optionally on a pod with `ROUTE_REMOTE`), 3D renders and the power-path plot in `hardware/out/`; `make hw-gerbers` - JLCPCB Gerber/drill zips in `hardware/out/gerbers/` and assembly BOM/CPL CSVs in `hardware/out/assembly/`
+- `make hw-pcb` - PCB placement + routing of both boards (KiCad Python; the clean copper is pinned in `hardware/routes/*.json`, re-routed with Freerouting only if it stops passing DRC: Java 25+, jar per `hardware/DESIGN.md`, optionally on a pod with `ROUTE_REMOTE`), 3D renders, the power-path plot in `hardware/out/` and the track parasitics in `hardware/routes/parasitics.json` (`parasitics.py`; read by `power_sim.py` and `link_si.py`); `make hw-gerbers` - JLCPCB Gerber/drill zips in `hardware/out/gerbers/` and assembly BOM/CPL CSVs in `hardware/out/assembly/`
 - `make g1` - gate G1 report; re-run after changing gains, loop timing, or `sim/model/params.py`
 - `make video` - swarm SITL GIF (`docs/img/swarm-sitl.gif`) and MP4 (`build/`); needs ffmpeg
 - `make viewer` - 3D replay viewer of the G1 and SITL scenarios (generated, git-ignored)

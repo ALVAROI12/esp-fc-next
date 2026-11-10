@@ -17,7 +17,7 @@ COVERAGE_UNREACHABLE := --exclude '.*/controller_indi\.c' --exclude '.*/position
 COVERAGE_FILTERS := --include-internal-functions --filter 'firmware/flight/components/core/' \
 	--filter 'firmware/fc_core/src/' --filter 'firmware/fc_core/host/' $(COVERAGE_UNREACHABLE)
 
-.PHONY: hw-setup hw all flight flight-fcstep flight-c5link radio core-test core-coverage sim-setup sim-test g1 vibration failsafe flow-braking swarm video link-fuzz core-lint core-tidy mbedtls-src viewer pdf clean
+.PHONY: hw-setup hw all flight flight-qemu flight-fcstep flight-c5link radio core-test core-coverage sim-setup sim-test g1 vibration failsafe flow-braking swarm video link-fuzz core-lint core-tidy mbedtls-src viewer pdf clean
 
 all: flight radio core-test
 
@@ -86,6 +86,13 @@ core-tidy: core-test
 flight:
 	$(call idf_build,firmware/flight,$(FLIGHT_TARGET))
 
+# ESP32-S3 image booted in Espressif's QEMU inside the IDF container: fails on a panic or if app_main is not reached.
+# QEMU has no P4 or C5 machine, no radio and no sensors, so this checks start-up only (log: qemu_uart.log).
+flight-qemu:
+	$(IDF) firmware/flight -B build-esp32s3-qemu -D SDKCONFIG=build-esp32s3-qemu/sdkconfig -D IDF_TARGET=esp32s3 \
+		-D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.esp32s3;../fc_core/target/sdkconfig.qemu" build
+	tools/qemu_boot.sh build-esp32s3-qemu
+
 # Same image with fc_step running in the stabilizer task (CONFIG_ESPFC_FC_STEP); compile check, not flight-ready.
 flight-fcstep:
 	$(IDF) firmware/flight -B build-$(FLIGHT_TARGET)-fcstep -D SDKCONFIG=build-$(FLIGHT_TARGET)-fcstep/sdkconfig \
@@ -126,6 +133,7 @@ hw-pcb:
 	  for s in top bottom; do \
 	  $(KICAD_CLI) pcb render --side $$s --width 1400 --height 1400 --quality high --zoom 1 --background opaque \
 	  -o out/render/$$b-$$s.png out/$$b-routed.kicad_pcb || exit 1; done; done
+	cd hardware && $(KICAD_PY) parasitics.py
 	cd hardware && uv run -q --with matplotlib --with-requirements requirements.txt python plot_power.py
 
 # JLCPCB upload: hardware/out/gerbers/<board>.zip (Gerber X1 with Protel extensions, Excellon drills, one origin)

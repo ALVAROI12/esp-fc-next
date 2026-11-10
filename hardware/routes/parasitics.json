@@ -1,0 +1,237 @@
+{
+ "assumptions": {
+  "copper_mm": {
+   "F.Cu": 0.035,
+   "B.Cu": 0.035,
+   "In1.Cu": 0.0152,
+   "In2.Cu": 0.0152
+  },
+  "prepreg_mm": 0.2104,
+  "dk": 4.4,
+  "temp_c": 60.0,
+  "z0_ohm_0.1mm": 86.4
+ },
+ "fc_board": {
+  "vbat": {
+   "net": "VBAT",
+   "from": [
+    "J2.1"
+   ],
+   "to": [
+    "R1.1"
+   ],
+   "mohm": 60.88,
+   "nh": 6.33,
+   "mm": 20.19,
+   "stub_mm": 0.75,
+   "min_width_mm": 0.225
+  },
+  "vbat_shunt": {
+   "net": "VBAT_SHUNT",
+   "from": [
+    "R1.2"
+   ],
+   "to": [
+    "Q1.1",
+    "Q1.2",
+    "Q1.5",
+    "Q1.6",
+    "Q1.7"
+   ],
+   "mohm": 47.66,
+   "nh": 4.27,
+   "mm": 13.54,
+   "stub_mm": 10.9,
+   "min_width_mm": 0.25
+  },
+  "vsys": {
+   "net": "VSYS",
+   "from": [
+    "Q1.4",
+    "Q1.8"
+   ],
+   "to": [
+    "U3.1",
+    "U3.10"
+   ],
+   "mohm": 57.83,
+   "nh": 4.84,
+   "mm": 15.49,
+   "stub_mm": 4.72,
+   "min_width_mm": 0.2502
+  },
+  "3v3_cout": {
+   "net": "3V3",
+   "from": [
+    "U3.6"
+   ],
+   "to": [
+    "C3.1",
+    "C4.1"
+   ],
+   "mohm": 7.26,
+   "nh": 1.16,
+   "mm": 3.84,
+   "stub_mm": 167.99,
+   "min_width_mm": 0.09
+  },
+  "3v3_stack": {
+   "net": "3V3",
+   "from": [
+    "U3.6"
+   ],
+   "to": [
+    "J8.1",
+    "J8.2"
+   ],
+   "mohm": 170.54,
+   "nh": 16.23,
+   "mm": 49.67,
+   "stub_mm": 122.16,
+   "min_width_mm": 0.09
+  },
+  "link_mosi": {
+   "net": "C5_MOSI",
+   "from": [
+    "U1.2"
+   ],
+   "to": [
+    "J8.5"
+   ],
+   "mohm": 515.25,
+   "nh": 21.85,
+   "mm": 44.35,
+   "stub_mm": 0.0,
+   "min_width_mm": 0.1
+  },
+  "link_miso": {
+   "net": "C5_MISO",
+   "from": [
+    "U1.3"
+   ],
+   "to": [
+    "J8.6"
+   ],
+   "mohm": 327.8,
+   "nh": 13.49,
+   "mm": 26.81,
+   "stub_mm": 11.94,
+   "min_width_mm": 0.09
+  },
+  "link_sclk": {
+   "net": "C5_SCLK",
+   "from": [
+    "U1.4"
+   ],
+   "to": [
+    "J8.7"
+   ],
+   "mohm": 474.71,
+   "nh": 19.84,
+   "mm": 39.82,
+   "stub_mm": 0.0,
+   "min_width_mm": 0.1
+  },
+  "link_cs": {
+   "net": "C5_CS",
+   "from": [
+    "U1.5"
+   ],
+   "to": [
+    "J8.8"
+   ],
+   "mohm": 322.87,
+   "nh": 13.31,
+   "mm": 26.47,
+   "stub_mm": 0.0,
+   "min_width_mm": 0.09
+  }
+ },
+ "radio_board": {
+  "3v3": {
+   "net": "3V3",
+   "from": [
+    "J1.1",
+    "J1.2"
+   ],
+   "to": [
+    "U1.3"
+   ],
+   "mohm": 11.02,
+   "nh": 1.77,
+   "mm": 5.82,
+   "stub_mm": 12.34,
+   "min_width_mm": 0.3
+  },
+  "3v3_cin": {
+   "net": "3V3",
+   "from": [
+    "U1.3"
+   ],
+   "to": [
+    "C1.1"
+   ],
+   "mohm": 31.63,
+   "nh": 4.6,
+   "mm": 15.05,
+   "stub_mm": 3.11,
+   "min_width_mm": 0.3
+  },
+  "link_mosi": {
+   "net": "C5_MOSI",
+   "from": [
+    "J1.5"
+   ],
+   "to": [
+    "U1.20"
+   ],
+   "mohm": 53.16,
+   "nh": 4.48,
+   "mm": 9.36,
+   "stub_mm": 0.0,
+   "min_width_mm": 0.1
+  },
+  "link_miso": {
+   "net": "C5_MISO",
+   "from": [
+    "J1.6"
+   ],
+   "to": [
+    "U1.21"
+   ],
+   "mohm": 59.12,
+   "nh": 4.95,
+   "mm": 10.34,
+   "stub_mm": 0.0,
+   "min_width_mm": 0.09
+  },
+  "link_sclk": {
+   "net": "C5_SCLK",
+   "from": [
+    "J1.7"
+   ],
+   "to": [
+    "U1.10"
+   ],
+   "mohm": 89.69,
+   "nh": 4.08,
+   "mm": 8.59,
+   "stub_mm": 0.0,
+   "min_width_mm": 0.1
+  },
+  "link_cs": {
+   "net": "C5_CS",
+   "from": [
+    "J1.8"
+   ],
+   "to": [
+    "U1.22"
+   ],
+   "mohm": 59.46,
+   "nh": 5.01,
+   "mm": 10.47,
+   "stub_mm": 0.0,
+   "min_width_mm": 0.1
+  }
+ }
+}
