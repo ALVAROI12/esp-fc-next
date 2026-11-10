@@ -17,7 +17,7 @@ COVERAGE_UNREACHABLE := --exclude '.*/controller_indi\.c' --exclude '.*/position
 COVERAGE_FILTERS := --include-internal-functions --filter 'firmware/flight/components/core/' \
 	--filter 'firmware/fc_core/src/' --filter 'firmware/fc_core/host/' $(COVERAGE_UNREACHABLE)
 
-.PHONY: hw-setup hw all flight flight-fcstep flight-c5link radio core-test core-coverage sim-setup sim-test g1 vibration failsafe flow-braking swarm link-fuzz core-lint core-tidy mbedtls-src viewer pdf clean
+.PHONY: hw-setup hw all flight flight-fcstep flight-c5link radio core-test core-coverage sim-setup sim-test g1 vibration failsafe flow-braking swarm video link-fuzz core-lint core-tidy mbedtls-src viewer pdf clean
 
 all: flight radio core-test
 
@@ -157,6 +157,10 @@ flow-braking:
 # Task 1.8 four-drone swarm missions with injected faults -> sim/reports/swarm/README.md (non-zero exit on failure).
 swarm:
 	cd sim && .venv/bin/python swarm_report.py
+
+# Four-drone SITL mission with a link loss mid-swap -> docs/img/swarm-sitl.gif and build/swarm-sitl.mp4 (needs ffmpeg).
+video:
+	cd sim && .venv/bin/python swarm_video.py
 
 # Interactive 3D replay of the G1 scenarios -> sim/reports/viewer/index.html (opens in the browser).
 viewer:

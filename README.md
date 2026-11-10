@@ -38,6 +38,12 @@ The full plan, gap analysis and gates are in [`docs/ESP-FC-Next_Project_Plan.pdf
 | **Encrypted radio link** | P4 to C5 over SPI, Crazyflie CRTP inside an AES-CCM envelope, fuzzed with libFuzzer. cflib driver included. |
 | **Hardware as code** | Both boards written in SKiDL, checked by 22 tests, routed against JLCPCB's 4-layer rules. |
 
+<div align="center">
+<img src="docs/img/swarm-sitl.gif" width="70%" alt="Four simulated drones take off, form a square and swap corners; one loses its radio link and lands by itself">
+
+<sub>`make video`: four copies of the real C flight firmware fly a 6-DOF model. Drone 3 loses its radio link mid-swap and lands by itself. Simulation, 2x speed.</sub>
+</div>
+
 ## Architecture
 
 ```mermaid
@@ -130,6 +136,7 @@ make viewer      # 3D replay in the browser
 | `make failsafe` | Opt-in latched landing/fault evidence ([`sim/reports/failsafe`](sim/reports/failsafe/README.md)) |
 | `make flow-braking` | Camera-loss braking comparison and sampled stresses |
 | `make link-fuzz` | libFuzzer run of the P4<->C5 link codec ([protocols](docs/protocols.md)); `FUZZ_SECONDS=60` for a smoke run |
+| `make video` | Swarm mission GIF for this README and an MP4 in `build/` (needs ffmpeg) |
 | `make viewer` | Interactive 3D simulation replay with charts (opens in the browser) |
 | `make hw-setup` / `make hw` | Hardware venv; netlists, drawn KiCad sheets and the G4 checks (needs KiCad 10 + ngspice) |
 | `make hw-pcb` | Placement, routing (pinned in `hardware/routes/`, Freerouting if it stops passing DRC), 3D renders, power-path plot |
